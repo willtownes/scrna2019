@@ -1,0 +1,48 @@
+---
+title: "Zheng 2017 Monocytes (Biological Negative Control)"
+author: "Will Townes"
+date: "12/04/2018"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+98% pure monocytes sorted by FACS
+
+Obtain UMI count matrix 
+
+```
+pushd real/zheng_2017_monocytes
+mkdir -p data
+wget http://cf.10xgenomics.com/samples/cell-exp/1.1.0/cd14_monocytes/cd14_monocytes_filtered_gene_bc_matrices.tar.gz -P data
+tar -xzf data/cd14_monocytes_filtered_gene_bc_matrices.tar.gz -C data --strip-components=1
+rm data/cd14_monocytes_filtered_gene_bc_matrices.tar.gz
+```
+
+Obtain per-molecule information file to get read counts
+
+```
+wget http://cf.10xgenomics.com/samples/cell-exp/1.1.0/cd14_monocytes/cd14_monocytes_molecule_info.h5 -P data
+popd
+```
+
+Merge UMI counts and read counts into single sce object
+
+```{r}
+library(SingleCellExperiment)
+source("./util/functions.R") #get_10x_readcounts function
+fp<-file.path
+bp<-"./real/zheng_2017_monocytes"
+
+sce<-get_10x_readcounts(fp(bp,"data/hg19"),fp(bp,"data/cd14_monocytes_molecule_info.h5"))
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+
+# Compute SCRAN size factors
+#sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+sce<-scran::computeSumFactors(sce)
+sce<-scater::normalize(sce)
+#logcounts assay created, is log2(1+counts/scran size factor)
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+Can optionally delete the downloaded 10x files at this point to save disk space.

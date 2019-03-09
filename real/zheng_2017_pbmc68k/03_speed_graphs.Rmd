@@ -1,0 +1,35 @@
+---
+title: "Speed Test Graphs"
+author: "Will Townes"
+date: "2/11/2019"
+output: html_document
+---
+
+```{r}
+library(tidyverse)
+fp<-file.path
+pth<-"./real/zheng_2017_pbmc68k/results"
+odir<-fp(pth,"fig")
+if(!dir.exists(odir)){
+  dir.create(odir,recursive=TRUE)
+}
+pd<-read.table(fp(pth,"speed.txt"),header=TRUE)
+
+colnames(pd)[1]<-"method"
+#pd[,3:5]<-pd[,3:5]/60
+pd$method<-factor(pd$method,levels=c("zinbwave","glmpca","pca_rd","pca_log","pca_rp"))
+
+ggplot(pd,aes(x=N,y=elapsed,colour=method))+geom_line(size=1.2)+scale_x_log10()+scale_y_log10()+xlab("number of cells")+ylab("elapsed time (sec)")+theme_bw()
+ggsave(file=fp(odir,"speed_compare.pdf"),width=6,height=4)
+```
+
+Figure out power law exponent
+
+```{r}
+f<-function(el,N){coef(lm(log(el)~log(N)))[2]}
+pd %>% group_by(method) %>% summarize(power_law_slope=f(elapsed,N))
+```
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,279 @@
+---
+title: "Zheng Monocytes Exploratory"
+author: "Will Townes"
+date: "12/04/2018"
+output: html_document
+---
+
+Zheng 2017 Monocytes (10x)
+
+```{r}
+library(SingleCellExperiment)
+library(cowplot)
+#library(ggplot2)
+library(Matrix)
+source("./util/functions.R")
+source("./algs/existing.R")
+source("./util/clustering.R")
+source("./algs/glmpca.R")
+fp<-file.path
+bp<-"./real/zheng_2017_monocytes"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-TRUE #save plots?
+ggs<-function(plt,w=6,h=4,...){
+  if(sp){ ggsave(file=fp(pth,plt),width=w,height=h,...) }
+}
+```
+
+Load UMI counts matrix and read counts matrix
+
+```{r}
+sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+m<-assay(sce,"counts")
+Y<-as.matrix(m)
+sz<-colSums(Y)
+Ycpm<-1e6*t(t(Y)/sz)
+Yl2<-log2(1+Ycpm)
+z<-log10(sz)
+pz<-colMeans(Y==0)
+Ypr<-null_residuals(Y,type="pearson")
+Ydr<-null_residuals(Y,type="deviance")
+rc<-assay(sce,"read_counts")
+Yl2scran<-assay(sce,"logcounts")
+
+set.seed(205) #reproducibility
+ss<-sample.int(nrow(Y),size=5000) #subset random 5000 genes
+```
+
+plot histogram of a particular gene for reads and umis
+
+```{r}
+rmx<-apply(Y,1,max)
+g<-match(20,rmx)
+gn<-rownames(Y)[g]
+pd<-list(data.frame(prot="raw_umi_counts",expr=Y[g,]))
+pd[[2]]<-data.frame(prot="raw_read_counts",expr=rc[g,])
+pd<-do.call(rbind,pd)
+plts<-list()
+ymax<-750
+(plts[[1]]<-ggplot(subset(pd,prot=="raw_umi_counts"),aes(x=expr))+geom_bar()+ylim(NA,ymax)+theme_bw()+xlab(paste(gn,"UMI counts"))+ylab("number of droplets in bin"))
+ggs("monocytes_umi_distr.pdf")
+(plts[[2]]<-ggplot(subset(pd,prot=="raw_read_counts"),aes(x=expr))+geom_histogram(bins=100)+ylim(NA,ymax)+theme_bw()+xlab(paste(gn,"read counts"))+ylab("number of droplets in bin"))#+ylab(NULL))
+ggs("monocytes_read_distr.pdf")
+plot_grid(plotlist=plts)
+ggs("reads_vs_umis_monocytes.pdf")
+```
+
+Fraction of zeros in each droplet determined by total UMIs.
+
+```{r}
+pd<-data.frame(sz=sz,pz=pz)
+(plt<-ggplot(pd,aes(x=sz,y=pz))+geom_point()+theme_bw()+xlab("total UMI per droplet")+ylab("fraction of zeros per droplet")+scale_x_log10())
+(plt2<-ggExtra::ggMarginal(plt,type="histogram",fill="white",bins=100))
+ggs("total_umi_vs_pzero_monocytes.pdf",plot=plt2)
+```
+
+Log transformation distorts distribution
+
+```{r}
+#find gene where max count across all droplets was 5
+rmx<-apply(Y,1,max)
+g<-match(20,rmx)
+gn<-rownames(Y)[g] #ENSG00000114391
+plts<-list()
+(plts[["umi"]]<-ggplot(data.frame(x=Y[g,]),aes(x=x))+geom_bar()+theme_bw()+xlab("counts")+ylab(NULL))
+ggs("monocytes_distr_a_umi_counts.pdf",w=3,h=2)
+(plts[["cpm"]]<-ggplot(data.frame(x=Ycpm[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("CPM")+ylab(NULL))
+ggs("monocytes_distr_b_cpm.pdf",w=3,h=2)
+(plts[["logcpm"]]<-ggplot(data.frame(x=Yl2[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+CPM)")+ylab(NULL))
+ggs("monocytes_distr_c_log2cpm.pdf",w=3,h=2)
+(plts[["logcptt"]]<-ggplot(data.frame(x=log2(1+Ycpm[g,]/100)),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+CPTT)")+ylab(NULL))
+ggs("monocytes_distr_d_log2cptt.pdf",w=3,h=2)
+(plts[["logscran"]]<-ggplot(data.frame(x=Yl2scran[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+scran)")+ylab(NULL))
+ggs("monocytes_distr_e_log2scran.pdf",w=3,h=2)
+
+plot_grid(plotlist=plts,nrow=2)
+ggs("counts_vs_log_cpm_histograms_monocytes.pdf",w=7.5,h=5)
+```
+
+Library Size/ Fraction of Zeros dominates first PC even after normalization/ log transform
+
+```{r}
+factors<-pca(Yl2[ss,],10)
+pd<-cbind(factors[,1:3],zero_frac=pz,log_total_umi=z)
+if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
+ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
+ggs("log_cpm_pca12_zerofrac_monocytes.pdf")
+ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
+ggs("log_cpm_pca1_zerofrac_total_umi_monocytes.pdf")
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
+#apply clustering to the result of PCA
+cl<-seurat_cluster(factors,res=0.5)
+pd<-cbind(cl,zero_frac=pz)
+ggplot(pd,aes(x=factor(cluster),y=zero_frac))+geom_boxplot()+xlab("Seurat cluster ID")+ylab("zero fraction")
+ggs("pca_seurat_cluster_zero_frac_monocytes.pdf")
+
+#tsne on top 50 PCs
+tsf<-tsne(Yl2[ss,],2,perplexity=30,pca=TRUE)
+pd2<-cbind(tsf,zero_frac=pz,log_total_umi=z)
+#nonlinear color scale from https://stackoverflow.com/a/12838299
+qn<-quantile(pd2$zero_frac, seq(from=0,to=1,length.out=20))
+cols<-colorRampPalette(c("blue","purple","red"))(20)
+vals<-scales::rescale(qn) 
+ggplot(pd2,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_gradientn(colours=cols,values=vals)+xlab("dimension 1")+ylab("dimension 2")
+ggs("log_cpm_tsne12_zerofrac_monocytes.pdf")
+```
+
+same procedure as above except using GLM-PCA
+
+```{r}
+ff<-fp(bp,"results","glmpca_L10_rand_5K_genes.txt")
+if(!file.exists(ff)){
+  ctl<-list(maxIter=500,eps=1e-4)
+  toc<-system.time(res<-glmpca(Y[ss,],10,verbose=TRUE,ctl=ctl))
+  factors<-res$factors
+  write.table(factors,file=ff)
+} else {
+  factors<-read.table(ff,header=TRUE)
+}
+pd<-cbind(factors,zero_frac=pz,log_total_umi=z)
+if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
+ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
+ggs("glmpca12_zerofrac_monocytes.pdf")
+ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
+ggs("glmpca1_zerofrac_total_umi_monocytes.pdf")
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
+#apply clustering to the result of GLMPCA
+cl<-seurat_cluster(factors,res=0.5)
+pd<-cbind(cl,zero_frac=pz)
+ggplot(pd,aes(x=factor(cluster),y=zero_frac))+geom_boxplot()+xlab("Seurat cluster ID")+ylab("zero fraction")
+ggs("glmpca_seurat_cluster_zero_frac_monocytes.pdf")
+
+#tsne on top 50 GLMPCA factors
+ff<-fp(bp,"results","glmpca_L50_rand_5K_genes.txt")
+if(!file.exists(ff)){
+  ctl<-list(maxIter=500,eps=1e-4)
+  toc<-system.time(res<-glmpca(Y[ss,],50,verbose=TRUE,ctl=ctl))
+  factors<-res$factors
+  write.table(factors,file=ff)
+} else {
+  factors<-read.table(ff,header=TRUE)
+}
+tsf<-tsne(t(factors),2,perplexity=30,pca=FALSE,rmzero=FALSE)
+pd2<-cbind(tsf,zero_frac=pz,log_total_umi=z)
+#nonlinear color scale from https://stackoverflow.com/a/12838299
+qn<-quantile(pd2$zero_frac, seq(from=0,to=1,length.out=20))
+cols<-colorRampPalette(c("blue","purple","red"))(20)
+vals<-scales::rescale(qn) 
+ggplot(pd2,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_gradientn(colours=cols,values=vals)+xlab("dimension 1")+ylab("dimension 2")
+ggs("glmpca_tsne12_zerofrac_monocytes.pdf")
+```
+
+more tsne combinations
+
+```{r}
+plx<-c(1,2,5,10,30,100)
+Ypca<-t(pca(Yl2,50))
+f<-function(p){
+  factors<-tsne(Ypca,2,perplexity=p,pca=FALSE)
+  cbind(factors,zero_frac=pz,log_total_umi=z,perplexity=p)
+}
+pd<-do.call(rbind,lapply(plx,f))
+ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_continuous(low="blue",high="red")+facet_wrap(~perplexity,scales="free",nrow=3)
+ggs("log_cpm_tsne12_zerofrac_monocytes.pdf",w=10,h=15)
+
+#larger number of perplexities
+plx2<-c(.5,1:20,40,60,80,100,150,200)
+pd2<-do.call(rbind,lapply(plx2,f))
+pdf(fp(pth,"log_cpm_tsne12_zerofrac_monocytes_big.pdf"))
+for(p in plx2){
+  print(ggplot(subset(pd2,perplexity==p),aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")+ggtitle(paste("perplexity=",p)))
+}
+dev.off()
+```
+
+Show relationship between mean expression and probability of zero follows multinomial prediction.
+
+```{r}
+Down_Sample_Matrix<-function(expr_mat){
+  #adapted from https://hemberg-lab.github.io/scRNA.seq.course/cleaning-the-expression-matrix.html#normalisations
+  min_lib_size<-min(colSums(expr_mat))
+  down_sample<-function(x){
+    prob <- min_lib_size/sum(x)
+    unlist(lapply(x,function(y){rbinom(1, y, prob)}))
+  }
+  apply(expr_mat, 2, down_sample)
+}
+
+#downsample to normalize droplet size (total UMI)
+Yds<-Down_Sample_Matrix(Y)
+Yds<-Yds[rowSums(Yds)>0,]
+#variance=mean, suggests poisson
+m<-rowMeans(Yds); v<-apply(Yds,1,var)
+summary(v/m)
+plot(log(m),log(v),xlab="log(mean)",ylab="log(var)")
+abline(0,1,col="blue") #poi
+curve(x+log1p(exp(x)/5),from=-8,to=3,add=TRUE,lty=2,col="red") #nb
+
+N<-median(colSums(Yds))
+predict_zeros_binom<-function(x){(1-exp(x)/N)^N} #binomial
+predict_zeros_poi<-function(x){exp(-exp(x))}
+predict_zeros_nb<-function(x,phi=2){
+  exp(-phi*log1p(exp(x-log(phi))))
+}
+pd<-data.frame(log_mean=log(m),frac_zero=rowMeans(Yds==0))
+xlo<-min(pd$log_mean)
+xhi<-max(pd$log_mean)
+xcv<-data.frame(x=c(xlo,xhi))
+ggplot(xcv)+geom_point(data=pd,aes(x=log_mean,y=frac_zero),alpha=.5) +stat_function(aes(x,color="bin"),fun=predict_zeros_binom) +stat_function(aes(x,color="poi"),fun=predict_zeros_poi) +stat_function(aes(x,color="nb"),fun=predict_zeros_nb) #+scale_color_manual("model",breaks=c("bin","poi","nb"),values=c("blue","green","red"))
+#ggs("logmean_pzero_binom_monocytes.pdf")
+
+pdf(fp(pth,"logmean_pzero_monocytes.pdf"),width=6,height=4)
+#same plot but using base plot
+with(pd,plot(log_mean,frac_zero,xlab="log of mean expression",ylab="fraction of zero droplets",cex=1.5))
+curve(predict_zeros_binom,from=xlo,to=xhi,col="blue",lwd=4,add=TRUE)
+curve(predict_zeros_poi,from=xlo,to=xhi,col="green",lwd=3,lty=2,add=TRUE)
+curve(predict_zeros_nb(x,phi=4),from=xlo,to=xhi,col="red",lwd=3,lty=3,add=TRUE)
+legend("bottomleft",c("Multinomial","Poisson","Negative Binomial"),lty=c(1,2,3),lwd=c(4,3,3),col=c("blue","green","red"))
+dev.off()
+```
+
+testing for zero inflation
+
+```{r}
+score_test<-function(x,m){
+  #x a vector of count data
+  #m a vector of multiplicative offsets (log(m) is the offset in glm terms)
+  #computes a score test statistic for zero inflation from (van den Broek 1995)
+  #test statistic is distributed as chisquare(1). 
+  #Rejection of null means simple poisson insufficient, may be zero inflated/ overdispersed
+  #model is x[i]~poisson(m[i]*lambda)
+  lambda<-sum(x)/sum(m) #Poisson MLE, scalar
+  mu<-lambda*m #Poisson mean, adjusted for offset, vector
+  p0<-exp(-mu) #predicted probability of zero, vector
+  z<- x==0
+  num<-sum((z-p0)/p0)^2
+  denom<-sum((1-p0)/p0)-sum(mu)
+  num/denom #test statistic as chisq(1), high value=more zero inflation
+}
+
+#hypothesis testing of whether there is zero inflation
+thresh<-qchisq(.05/nrow(Yds),1,lower.tail=FALSE)
+s<-apply(Yds,1,score_test,colMeans(Yds))
+hist(s)
+abline(v=thresh,lty=2)
+table(s>thresh)
+
+pd$zero_inflated<-ifelse(s>thresh,"zero_inflated","normal")
+#predict_zeros<-function(x){exp(-exp(x))} #poisson
+ggplot(xcv)+xlab("log of mean expression")+ylab("fraction of zero droplets")+geom_point(data=pd,size=1,aes(x=log_mean,y=frac_zero,colour=zero_inflated))+scale_color_manual(breaks=c("normal","zero_inflated"),values=c("blue","red"))+stat_function(aes(x),fun=predict_zeros_binom)
+```
+
+```{r}
+sessionInfo()
+```

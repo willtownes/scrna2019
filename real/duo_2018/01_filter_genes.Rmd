@@ -1,0 +1,86 @@
+---
+title: "Duo et al 2018"
+output: html_document
+---
+
+```{r}
+library(DuoClustering2018)
+library(eulerr)
+source("./util/functions_genefilter.R")
+
+fp<-file.path
+bp<-"./real/duo_2018"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-FALSE #save plots?
+if(!dir.exists(fp(bp,"data"))) dir.create(fp(bp,"data"))
+```
+
+# Informative Genes by Various Criteria
+
+```{r}
+sce<-sce_full_Zhengmix8eq()
+res<-list()
+res$expr<-filterExpr(sce)
+res$hvg<-filterHVG(sce)
+res$devb<-filterDev(sce,dev="binomial")
+res$devp<-filterDev(sce,dev="poisson")
+f<-function(sn){
+  s<-res[[sn]]
+  x<-data.frame(gene=rownames(s),rank=seq_len(nrow(s)))
+  colnames(x)[2]<-sn
+  x
+}
+res2<-lapply(names(res),f)
+rk<-Reduce(function(x,y){merge(x,y,by="gene",all=TRUE)},res2)
+rownames(rk)<-rk$gene
+rk$gene<-NULL
+#rk is data frame with all genes and their informative ranks based on 5 criteria
+write.table(rk,file=fp(bp,"data","genefilter_ranks_8eq.txt"),quote=FALSE)
+```
+
+```{r}
+#sce<-sce_full_Zhengmix8eq()
+#rk<-read.table(fp(bp,"data","genefilter_ranks_8eq.txt"))
+rk<-rk[rownames(sce),]
+Y<-normcounts(sce)
+pd<-data.frame(m=rowMeans(Y),v=apply(Y,1,var))
+pd$vmr=pd$v/pd$m
+pd<-cbind(pd,rk)
+pd<-subset(pd,vmr>0)
+pd$criteria<-"neither (13,886)"
+pd$criteria[pd$devb<=1000 & pd$hvg<=1000]<-"both (171)"
+pd$criteria[pd$devb<=1000 & pd$hvg>1000]<-"high deviance (829)"
+pd$criteria[pd$devb>1000 & pd$hvg<=1000]<-"highly variable (829)"
+ggplot(pd,aes(x=m,y=vmr,colour=criteria))+geom_point()+scale_x_log10() +xlab("average normalized expression") +ylab("variance to mean ratio") +theme(legend.position=c(0,.7))
+#+scale_size_manual(values=c(1,1,1,.5))+scale_y_log10() #size=criteria, legend.position=c(.5,.2)
+ggsave(file=fp(pth,"zheng8eq_mean_var.pdf"),width=6,height=4)
+```
+
+```{r}
+#rk<-read.table(fp(bp,"data","genefilter_ranks_8eq.txt"))
+#spearman rank correlations of the criteria
+cor(rk,method="spearman") #poisson, binomial deviance almost identical
+all(rk$devb==rk$devp) #poisson,binomial deviance not exactly identical
+G<-1500
+rk2<- rk<=G
+crossprod(rk2) / G
+rk2<-as.data.frame(rk2)
+with(rk2,table(devb,devp)) #devp,devb perfect overlap on top 1500 genes
+gg<-subset(rk2[,-4],expr | hvg | devb )
+colnames(gg)<-c("Expr","HVG","Dev")
+eul<-euler(gg)
+#pdf(file=fp(pth,"genefilter_overlap_zhengmix8eq.pdf"),width=6,height=4)
+plot(eul,quantities=TRUE,fill="transparent")
+#dev.off()
+```
+
+As shown above, the Poisson and Binomial deviance criteria rank genes almost, but not exactly, identically. The highly expressed genes agree with the deviance methods (Spearman's Rank Correlation 0.9987), while the highly variable genes disagree with all other methods (Spearman's Rank Correlations ranging from .3738-.3835). Focusing on the top 1500 genes, we find that the two deviance methods select the exact same set of genes as "highly informative". There is very strong overlap with the highly expressed genes as well, while neither the highly expressed nor highly deviant genes overlap much with the highly variable genes.
+
+# Session information
+
+```{r}
+sessionInfo()
+```

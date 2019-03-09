@@ -1,0 +1,60 @@
+---
+title: "Zheng 2017 PBMC (68K, speed test)"
+author: "Will Townes"
+date: "02/10/2019"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+Obtain UMI count matrix 
+
+```
+pushd real/zheng_2017_pbmc68k
+mkdir -p data
+wget http://cf.10xgenomics.com/samples/cell-exp/1.1.0/fresh_68k_pbmc_donor_a/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz -P data
+tar -xzf data/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz -C data --strip-components=1
+rm data/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz
+popd
+```
+
+Compute deviance for all genes and store as SingleCellExperiment
+
+```{r}
+library(SingleCellExperiment)
+source("./util/functions.R") #compute_gene_info function
+fp<-file.path
+bp<-"./real/zheng_2017_pbmc68k"
+
+sce<-DropletUtils::read10xCounts(fp(bp,"data/hg19"))
+colnames(sce)<-colData(sce)$Barcode
+m<-assay(sce,"counts")
+gg<-Matrix::rowSums(m)>0 #remove genes that are all zero
+sce<-sce[gg,]
+m<-m[gg,]
+mod<-"binomial"
+#gm<-compute_gene_info(m,gmeta=rowData(sce),mod=mod)
+gnz<-Matrix::rowSums(m>0)
+sz<-compute_size_factors(m,mod)
+mt<-t(m) #faster slicing by column
+rm(m) #save memory
+p<-Matrix::colSums(mt)/sum(sz) #MLE for gene rel abundance
+gof<-function(g,verbose=FALSE){ 
+  if(verbose && g%%100==0){print(g)}
+  binomial_deviance(mt[,g],p[g],sz) 
+}
+#this should take about 20 mins for 20K genes x 68K cells
+system.time(dev<-vapply(1:ncol(mt),gof,FUN.VALUE=0.0,verbose=TRUE))
+o<-order(dev,decreasing=TRUE,na.last=FALSE)
+dev<-dev[o]
+gnz<-gnz[o]
+res<-sce[o,]
+gm<-rowData(res)
+gm$dev<-dev; gm$nz<-gnz
+rowData(res)<-gm
+#genes are sorted in order of decreasing deviance
+saveRDS(res,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+Can optionally delete the downloaded 10x files at this point to save disk space.
+

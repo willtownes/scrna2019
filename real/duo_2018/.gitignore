@@ -1,0 +1,7 @@
+data/*
+*_log.txt
+plots/*
+bsub_out/*
+nohup.out
+cache/*
+datacache/*

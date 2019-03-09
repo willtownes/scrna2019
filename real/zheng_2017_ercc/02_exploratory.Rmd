@@ -1,0 +1,305 @@
+---
+title: "Zheng ERCC Exploratory"
+author: "Will Townes"
+date: "12/04/2018"
+output: html_document
+---
+
+ERCC spike ins
+
+```{r}
+library(SingleCellExperiment)
+library(cowplot)
+#library(ggplot2)
+library(Matrix)
+source("./util/functions.R")
+source("./algs/existing.R")
+source("./algs/glmpca.R")
+source("./util/clustering.R")
+fp<-file.path
+bp<-"./real/zheng_2017_ercc"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-TRUE #save plots?
+ggs<-function(plt,w=6,h=4,...){
+  if(sp){ ggsave(file=fp(pth,plt),width=w,height=h,...) }
+}
+```
+
+useful functions
+
+```{r}
+Down_Sample_Matrix<-function(expr_mat){
+  #adapted from https://hemberg-lab.github.io/scRNA.seq.course/cleaning-the-expression-matrix.html#normalisations
+  min_lib_size<-min(colSums(expr_mat))
+  down_sample<-function(x){
+    prob <- min_lib_size/sum(x)
+    unlist(lapply(x,function(y){rbinom(1, y, prob)}))
+  }
+  apply(expr_mat, 2, down_sample)
+}
+
+score_test<-function(x,m){
+  #x a vector of count data
+  #m a vector of multiplicative offsets (log(m) is the offset in glm terms)
+  #computes a score test statistic for zero inflation from (van den Broek 1995)
+  #test statistic is distributed as chisquare(1). 
+  #Rejection of null means simple poisson insufficient, may be zero inflated/ overdispersed
+  #model is x[i]~poisson(m[i]*lambda)
+  lambda<-sum(x)/sum(m) #Poisson MLE, scalar
+  mu<-lambda*m #Poisson mean, adjusted for offset, vector
+  p0<-exp(-mu) #predicted probability of zero, vector
+  z<- x==0
+  num<-sum((z-p0)/p0)^2
+  denom<-sum((1-p0)/p0)-sum(mu)
+  num/denom #test statistic as chisq(1), high value=more zero inflation
+}
+
+lr_test<-function(x,m){
+  if(min(x)>0){
+    return(0)
+  }
+  full<-pscl::zeroinfl(x ~ 1 | 1, dist="poisson",offset=log(m))
+  reduced<-glm(x~1,family="poisson",offset=log(m))
+  2*as.numeric(logLik(full)-logLik(reduced))
+}
+```
+
+Load UMI counts matrix and read counts matrix
+
+```{r}
+sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+m<-assay(sce,"counts")
+Y<-as.matrix(m)
+sz<-colSums(Y)
+Ycpm<-1e6*t(t(Y)/sz)
+Yl2<-log2(1+Ycpm)
+z<-log10(sz)
+pz<-colMeans(Y==0)
+Ypr<-null_residuals(Y,type="pearson")
+Ydr<-null_residuals(Y,type="deviance")
+rc<-assay(sce,"read_counts")
+```
+
+plot histogram of a particular ERCC for reads and umis
+
+```{r}
+rmx<-apply(Y,1,max)
+g<-match(20,rmx)
+gn<-rownames(Y)[g]
+pd<-list(data.frame(prot="raw_umi_counts",expr=Y[g,]))
+pd[[2]]<-data.frame(prot="raw_read_counts",expr=rc[g,])
+pd<-do.call(rbind,pd)
+plts<-list()
+ymax<-250
+(plts[[1]]<-ggplot(subset(pd,prot=="raw_umi_counts"),aes(x=expr))+geom_bar()+ylim(NA,ymax)+theme_bw()+xlab(paste(gn,"UMI counts"))+ylab("number of droplets in bin"))
+ggs("ercc_umi_distr.pdf")
+(plts[[2]]<-ggplot(subset(pd,prot=="raw_read_counts"),aes(x=expr))+geom_histogram(bins=100)+ylim(NA,ymax)+theme_bw()+xlab(paste(gn,"read counts"))+ylab("number of droplets in bin"))#+ylab(NULL))
+ggs("ercc_read_distr.pdf")
+plot_grid(plotlist=plts)
+ggs("reads_vs_umis_ercc.pdf")
+```
+
+Fraction of zeros in each droplet determined by total UMIs.
+
+```{r}
+#ggplot(data.frame(z=z,pz=pz),aes(x=z,y=pz))+geom_point()+theme_bw()+xlab("log10(total UMI per droplet)")+ylab("fraction of zeros per droplet")
+#ggs("total_umi_vs_pzero_ercc.pdf")
+
+pd<-data.frame(sz=sz,pz=pz)
+(plt<-ggplot(pd,aes(x=sz,y=pz))+geom_point()+theme_bw()+xlab("total UMI per droplet")+ylab("fraction of zeros per droplet")+scale_x_log10())
+(plt2<-ggExtra::ggMarginal(plt,type="histogram",fill="white",bins=100))
+ggs("total_umi_vs_pzero_ercc.pdf",plot=plt2)
+```
+
+Log transformation distorts distribution
+
+```{r}
+#find gene where max count across all droplets was 20
+rmx<-apply(Y,1,max)
+g<-match(20,rmx)
+gn<-rownames(Y)[g] #ERCC-00163
+plts<-list()
+(plts[["umi"]]<-ggplot(data.frame(x=Y[g,]),aes(x=x))+geom_bar()+theme_bw()+xlab("counts")+ylab(NULL))
+(plts[["cpm"]]<-ggplot(data.frame(x=Ycpm[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("CPM")+ylab(NULL))
+(plts[["logcpm"]]<-ggplot(data.frame(x=Yl2[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+CPM)")+ylab(NULL))
+(plts[["logcptt"]]<-ggplot(data.frame(x=log2(1+Ycpm[g,]/100)),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+CPTT)")+ylab(NULL))
+plot_grid(plotlist=plts,nrow=2)
+ggs("counts_vs_log_cpm_histograms_ercc.pdf",w=7.5,h=5)
+```
+
+Library Size/ Fraction of Zeros dominates first PC even after normalization/ log transform
+
+```{r}
+factors<-pca(Yl2,10)
+pd<-cbind(factors[,1:5],zero_frac=pz,log_total_umi=z)
+if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
+ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
+ggs("log_cpm_pca12_zerofrac_ercc.pdf")
+ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
+ggs("log_cpm_pca1_zerofrac_total_umi_ercc.pdf")
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
+#apply clustering to the result of PCA
+cl<-seurat_cluster(factors,res=0.5)
+pd<-cbind(cl,zero_frac=pz)
+ggplot(pd,aes(x=factor(cluster),y=zero_frac))+geom_boxplot()+xlab("Seurat cluster ID")+ylab("zero fraction")
+ggs("pca_seurat_cluster_zero_frac_ercc.pdf")
+
+#tsne on top 50 PCs
+tsf<-tsne(Yl2,2,perplexity=30,pca=TRUE)
+pd2<-cbind(tsf,zero_frac=pz,log_total_umi=z)
+#nonlinear color scale from https://stackoverflow.com/a/12838299
+qn<-quantile(pd2$zero_frac, seq(from=0,to=1,length.out=20))
+cols<-colorRampPalette(c("blue","purple","red"))(20)
+vals<-scales::rescale(qn) 
+ggplot(pd2,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_gradientn(colours=cols,values=vals)+xlab("dimension 1")+ylab("dimension 2")
+ggs("log_cpm_tsne12_zerofrac_ercc.pdf")
+```
+
+same as above but using GLM-PCA
+
+```{r}
+factors<-glmpca(Y,10,verbose=TRUE)$factors
+pd<-cbind(factors,zero_frac=pz,log_total_umi=z)
+if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
+ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
+ggs("glmpca12_zerofrac_ercc.pdf")
+ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
+ggs("glmpca1_zerofrac_total_umi_ercc.pdf")
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
+#apply clustering to the result of GLMPCA
+cl<-seurat_cluster(factors,res=0.5)
+pd<-cbind(cl,zero_frac=pz)
+ggplot(pd,aes(x=factor(cluster),y=zero_frac))+geom_boxplot()+xlab("Seurat cluster ID")+ylab("zero fraction")
+ggs("glmpca_seurat_cluster_zero_frac_ercc.pdf")
+
+#tsne on top 50 GLMPCA factors
+ctl<-list(maxIter=500,eps=1e-4)
+toc<-system.time(res<-glmpca(Y,50,verbose=TRUE,ctl=ctl)) #5mins
+factors<-res$factors
+tsf<-tsne(t(factors),2,perplexity=30,pca=FALSE,rmzero=FALSE)
+pd2<-cbind(tsf,zero_frac=pz,log_total_umi=z)
+#nonlinear color scale from https://stackoverflow.com/a/12838299
+qn<-quantile(pd2$zero_frac, seq(from=0,to=1,length.out=20))
+cols<-colorRampPalette(c("blue","purple","red"))(20)
+vals<-scales::rescale(qn) 
+ggplot(pd2,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_gradientn(colours=cols,values=vals)+xlab("dimension 1")+ylab("dimension 2")
+ggs("glmpca_tsne12_zerofrac_ercc.pdf")
+```
+
+compare clustering of log-CPM pca vs glmpca
+
+```{r}
+silfunc<-function(f,cl,m="euclidean"){
+  cl<-as.integer(cl$cluster)
+  d<-dist(f,method=m)
+  sil<-cluster::silhouette(cl,d)
+  summary(sil)$avg.width
+}
+L<-2
+f1<-pca(Yl2,L)
+f2<-glmpca(Y,L)$factors
+resolution<-0.08
+c1<-seurat_cluster(f1,res=resolution)
+c2<-seurat_cluster(f2,res=resolution)
+silfunc(f1,c1)
+silfunc(f2,c2)
+table(c1$cluster)
+table(c2$cluster)
+
+k<-2
+c1<-kmeans_cluster(f1,k=k)
+c2<-kmeans_cluster(f2,k=k)
+silfunc(f1,c1)
+silfunc(f2,c2)
+```
+
+larger number of perplexities
+
+```{r}
+#plx<-c(1,2,5,10,30,100)
+f<-function(p){
+  factors<-tsne(Yl2,2,perplexity=p,pca=FALSE)
+  cbind(factors,zero_frac=pz,log_total_umi=z,perplexity=p)
+}
+#pd<-do.call(rbind,lapply(plx,f))
+#ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point(size=1)+scale_color_continuous(low="blue",high="red")+facet_wrap(~perplexity,scales="free",nrow=3)
+#ggs("log_cpm_tsne12_zerofrac_ercc.pdf",w=10,h=15)
+
+#larger number of perplexities
+plx2<-c(.5,1:20,40,60,80,100,150,200)
+pd2<-do.call(rbind,lapply(plx2,f))
+pdf(fp(pth,"log_cpm_tsne12_zerofrac_ercc_big.pdf"))
+for(p in plx2){
+  print(ggplot(subset(pd2,perplexity==p),aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")+ggtitle(paste("perplexity=",p)))
+}
+dev.off()
+```
+
+Check for zero inflation. We fit a score test and a likelihood ratio test to assess whether there is zero inflation. In both cases, the null hypothesis is that the Poisson model is sufficient. For the likelihood ratio test, the alternative model is the zero inflated Poisson.
+
+```{r}
+#downsample to normalize droplet size (total UMI)
+Yds<-Down_Sample_Matrix(Y[,colSums(Y)>10000])
+#variance=mean, suggests poisson
+m<-rowMeans(Yds); v<-apply(Yds,1,var)
+summary(v/m)
+plot(log(m),log(v),xlab="log(mean)",ylab="log(var)")
+abline(0,1)
+
+N<-median(colSums(Yds))
+predict_zeros_binom<-function(x){(1-exp(x)/N)^N} #binomial
+predict_zeros_poi<-function(x){exp(-exp(x))}
+predict_zeros_nb<-function(x,phi=2){
+  exp(-phi*log1p(exp(x-log(phi))))
+}
+pd<-data.frame(log_mean=log(m),frac_zero=rowMeans(Yds==0))
+xlo<-min(pd$log_mean[pd$log_mean>-Inf])
+xhi<-max(pd$log_mean)
+xcv<-data.frame(x=c(xlo,xhi))
+ggplot(xcv)+geom_point(data=pd,aes(x=log_mean,y=frac_zero),alpha=.5) +stat_function(aes(x,color="bin"),fun=predict_zeros_binom) +stat_function(aes(x,color="poi"),fun=predict_zeros_poi) #+scale_color_manual("model",breaks=c("bin","poi","nb"),values=c("blue","green","red"))
+
+pdf(fp(pth,"logmean_pzero_ercc.pdf"),width=6,height=4)
+#same plot but using base plot
+with(pd,plot(log_mean,frac_zero,xlab="log of mean expression",ylab="fraction of zero droplets",cex=2))
+curve(predict_zeros_binom,from=xlo,to=xhi,col="blue",lwd=5,add=TRUE)
+curve(predict_zeros_poi,from=xlo,to=xhi,col="green",lwd=4,lty=2,add=TRUE)
+legend("bottomleft",c("Multinomial","Poisson"),lty=c(1,1),lwd=c(5,4),col=c("blue","green"))
+dev.off()
+```
+
+hypothesis testing of whether there is zero inflation
+
+```{r}
+thresh<-qchisq(.05/nrow(Yds),1,lower.tail=FALSE)
+s<-apply(Yds,1,score_test,colMeans(Yds))
+hist(s)
+abline(v=thresh,lty=2)
+table(s>thresh)
+l<-apply(Yds,1,lr_test,colMeans(Yds))
+hist(l)
+abline(v=thresh,lty=2)
+table(l>thresh)
+
+pd$zero_inflated<-ifelse(l>thresh,"zero_inflated","normal")
+#predict_zeros<-function(x){exp(-exp(x))} #poisson
+predict_zeros<-function(x){(1-exp(x)/N)^N} #binomial
+ggplot(pd)+stat_function(data=data.frame(x=c(min(pd$log_mean),max(pd$log_mean))),aes(x),fun=predict_zeros)+xlab("log of mean expression")+ylab("fraction of zero droplets")+geom_point(aes(x=log_mean,y=frac_zero))#,colour=zero_inflated))+scale_color_manual(breaks=c("normal","zero_inflated"),values=c("blue","red"))
+#ggs("logmean_pzero_binom_ercc.pdf")
+```
+
+We rejected the null hypothesis of no zero inflation for several ERCCs (red points in the above graph). This is because the large sample size (number of cells) allows even small differences in predicted vs actual number of zeros to be "significant". None of the "significantly zero inflated" ERCCs deviate from the Poisson prediction by more than about 0.1.
+
+```{r}
+zi<-which.max(s)
+(actual<-mean(Yds[zi,]==0))
+(theor<-exp(-mean(Yds[zi,])))
+```
+
+```{r}
+sessionInfo()
+```
