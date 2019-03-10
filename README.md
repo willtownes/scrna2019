@@ -23,6 +23,8 @@ Analysis of various real scRNA-Seq datasets. The Rmarkdown files can be used to 
 
 Systematic assessment of clustering performance of a variety of normalization, feature selection, and dimension reduction algorithms using ground-truth datasets.
 
+**[Downloadable table of results from assessments](https://raw.githubusercontent.com/willtownes/scrna2019/master/real_benchmarking/results/cluster_accuracy.txt)**
+
 ### util
 
 Utility functions. 
