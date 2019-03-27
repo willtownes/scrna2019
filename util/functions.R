@@ -110,10 +110,12 @@ binomial_deviance_residuals<-function(X,p,n){
     mu<-t(t(p)*n)
   } else { stop("dimensions of p and X must match!") }
   term1<-X*log(X/mu)
-  term1[is.nan(term1)]<-0 #0*log(0)=0
+  # term1[is.nan(term1)]<-0 #0*log(0)=0
+  term1[is.na(term1)]<-0 #0*log(0)=0
   nx<- t(n-t(X))
   term2<-nx*log(nx/outer(1-p,n))
-  term2[is.nan(term2)]<-0
+  term2<-nx*log(nx/outer(1-p,n))
+  # term2[is.nan(term2)]<-0
   sign(X-mu)*sqrt(2*(term1+term2))
 }
 
