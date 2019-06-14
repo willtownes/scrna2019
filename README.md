@@ -13,7 +13,6 @@ Will Townes, Stephanie Hicks, Martin Aryee, and Rafa Irizarry
 Implementations of dimension reduction algorithms 
 * *existing.R* - wrapper functions for PCA, tSNE, ZINB-WAVE, etc
 * *glmpca.R* - implementation of PCA for generalized linear model likelihoods. This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
-* *ortho.R* - supporting functions for GLM-PCA that post-process latent factors so that the loadings are orthonormal (just like regular PCA).
 
 ### real
 
