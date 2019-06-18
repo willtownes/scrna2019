@@ -20,12 +20,14 @@ filterExpr<-function(sce, nkeep=nrow(sce)){
   res[,colSums(counts(res))>0]
 }
 
-filterHVG<-function(sce, nkeep=nrow(sce)){
+filterHVG<-function(sce, nkeep=nrow(sce), total_umi="nUMI"){
   #modified from https://github.com/markrobinsonuzh/scRNAseq_clustering_comparison/blob/master/Rscripts/filtering/filterHVG.R
-  seurat<-CreateSeuratObject(counts(sce),meta.data=as.data.frame(colData(sce)),min.cells=0,min.genes=0,project = "scRNAseq")
-  seurat<-NormalizeData(seurat,display.progress=FALSE)
-  seurat<-ScaleData(seurat,vars.to.regress="nUMI",display.progress=FALSE)
-  seurat<-FindVariableGenes(seurat,do.plot=FALSE,sort.results=TRUE,selection.method="dispersion",top.genes=nkeep,display.progress=FALSE)
-  res<-sce[seurat@var.genes, ]
+  seu<-CreateSeuratObject(counts(sce),meta.data=as.data.frame(colData(sce)),min.cells=0,min.features=0,project="scRNAseq")
+  seu<-NormalizeData(seu,verbose=FALSE)
+  seu<-ScaleData(seu,vars.to.regress=total_umi,verbose=FALSE)
+  seu<-FindVariableFeatures(seu,selection.method="dispersion",nfeatures=nkeep,verbose=FALSE)
+  vf<-head(VariableFeatures(seu), nkeep)
+  #sometimes Seurat coerces rownames, so use numeric IDs instead
+  res<-sce[match(vf,rownames(seu)), ]
   res[,colSums(counts(res))>0]
 }

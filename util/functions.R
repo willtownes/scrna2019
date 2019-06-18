@@ -1,5 +1,67 @@
 #Miscellaneous functions used by other scripts
 
+##### Data Loading functions #####
+
+get_10x_readcounts<-function(counts_folder,mol_info_h5){
+  #provide two file paths:
+  #counts_folder, containing "barcodes.tsv","genes.tsv","matrix.mtx"
+  #mol_info_h5, an hdf5 file with the 10x molecule information file
+  #output: a SingleCellExperiment with two sparse Matrix assays:
+  #"counts" (UMI counts), and "read_counts"
+  sce0<-DropletUtils::read10xCounts(counts_folder)
+  colnames(sce0)<-colData(sce0)$Barcode
+  m<-assay(sce0,"counts")
+  gg<-Matrix::rowSums(m)>0 #remove genes that are all zero
+  sce<-sce0[gg,]
+  m<-m[gg,]
+  cm<-colData(sce0)
+  bc<-substr(cm$Barcode,1,nchar(cm$Barcode)-2) #assumes barcode ends in "-1"
+  cm$bc_enc<-DropletUtils::encodeSequences(bc)
+  mi0<-as.data.frame(rhdf5::h5dump(mol_info_h5))
+  if(!all(cm$bc_enc %in% mi0$barcode)){
+    stop("Some count matrix barcodes not found in molecule information file!")
+  }
+  gidx<-read.table(file.path(counts_folder,"genes.tsv"),stringsAsFactors=FALSE)[,1]
+  mi<-subset(mi0, barcode %in% cm$bc_enc & gene<length(gidx))
+  mi$gene_symbol<-gidx[mi$gene+1]
+  cm2<-cm[,c("bc_enc","Barcode")]
+  colnames(cm2)<-c("barcode","barcode_str")
+  mi<-merge(mi,cm2,by="barcode")
+  rc<-DropletUtils::makeCountMatrix(mi$gene_symbol,mi$barcode_str,value=mi$reads)
+  rc<-rc[rownames(m),colnames(m)]
+  #umi<-DropletUtils::makeCountMatrix(mi$gene_symbol,mi$barcode_str)
+  #umi<-umi[rownames(m),colnames(m)]
+  #umi counts from molecule info file consistent with sce
+  #all(m==umi)
+  if(!all((rc>0) == (m>0) )){
+    stop("zero pattern inconsistent between counts matrix and molecule info")
+  }
+  if(!all(rc>=m)){
+    stop("Read counts not all >= UMI counts")
+  }
+  assay(sce,"read_counts")<-rc
+  sce
+}
+
+##### Downsampling functions #####
+
+Down_Sample_Matrix<-function(expr_mat,min_lib_size=NULL){
+  #adapted from https://hemberg-lab.github.io/scRNA.seq.course/cleaning-the-expression-matrix.html#normalisations
+  min_sz<-min(colSums(expr_mat))
+  if(is.null(min_lib_size)){
+    min_lib_size<-min_sz
+  } else {
+    stopifnot(min_lib_size<=min_sz)
+  }
+  down_sample<-function(x){
+    prob <- min_lib_size/sum(x)
+    unlist(lapply(x,function(y){rbinom(1, y, prob)}))
+  }
+  apply(expr_mat, 2, down_sample)
+}
+
+##### Deviance functions #####
+
 poisson_deviance<-function(x,mu,sz){
   #assumes log link and size factor sz on the same scale as x (not logged)
   #stopifnot(all(x>=0 & sz>0))
@@ -78,6 +140,8 @@ compute_gene_info<-function(m,gmeta=NULL,mod=c("binomial","multinomial","poisson
   if(is.null(gmeta)){ return(res) } else { return(cbind(gmeta,res)) }
 }
 
+##### Null Residuals functions #####
+
 poisson_deviance_residuals<-function(x,xhat){
   #x,xhat assumed to be same dimension
   #sz<-exp(offsets)
@@ -86,18 +150,6 @@ poisson_deviance_residuals<-function(x,xhat){
   term1[is.nan(term1)]<-0 #0*log(0)=0
   s2<-2*(term1-(x-xhat))
   sign(x-xhat)*sqrt(abs(s2))
-}
-
-multinomial_deviance_residuals<-function(X,p,n){
-  #X a matrix, n is vector of length ncol(X)
-  #if p is matrix, must have same dims as X
-  #if p is vector, its length must match nrow(X)
-  if(length(p)==nrow(X)){
-    mu<-outer(p,n)
-  } else if(!is.null(dim(p)) && dim(p)==dim(X)){
-    mu<-t(t(p)*n)
-  } else { stop("dimensions of p and X must match!") }
-  sign(X-mu)*sqrt(-2*X*log(p))
 }
 
 binomial_deviance_residuals<-function(X,p,n){
@@ -119,6 +171,19 @@ binomial_deviance_residuals<-function(X,p,n){
   sign(X-mu)*sqrt(2*(term1+term2))
 }
 
+# multinomial_deviance_residuals<-function(X,p,n){
+#   #not clear if this actually makes sense. Don't use this function!
+#   #X a matrix, n is vector of length ncol(X)
+#   #if p is matrix, must have same dims as X
+#   #if p is vector, its length must match nrow(X)
+#   if(length(p)==nrow(X)){
+#     mu<-outer(p,n)
+#   } else if(!is.null(dim(p)) && dim(p)==dim(X)){
+#     mu<-t(t(p)*n)
+#   } else { stop("dimensions of p and X must match!") }
+#   sign(X-mu)*sqrt(-2*X*log(p))
+# }
+
 null_residuals<-function(m,mod=c("binomial","multinomial","poisson","geometric"),type=c("deviance","pearson")){
   mod<-match.arg(mod)
   type<-match.arg(type)
@@ -130,7 +195,8 @@ null_residuals<-function(m,mod=c("binomial","multinomial","poisson","geometric")
       return((m-mhat)/sqrt(mhat*(1-phat)))
     } else { #deviance residuals
       if(mod=="multinomial"){
-        return(multinomial_deviance_residuals(m,phat,sz))
+        stop("multinomial deviance residuals not implemented yet")
+        #return(multinomial_deviance_residuals(m,phat,sz))
       } else { #binomial
         return(binomial_deviance_residuals(m,phat,sz))
       }
@@ -151,43 +217,111 @@ null_residuals<-function(m,mod=c("binomial","multinomial","poisson","geometric")
   }
 }
 
-get_10x_readcounts<-function(counts_folder,mol_info_h5){
-  #provide two file paths:
-  #counts_folder, containing "barcodes.tsv","genes.tsv","matrix.mtx"
-  #mol_info_h5, an hdf5 file with the 10x molecule information file
-  #output: a SingleCellExperiment with two sparse Matrix assays:
-  #"counts" (UMI counts), and "read_counts"
-  sce0<-DropletUtils::read10xCounts(counts_folder)
-  colnames(sce0)<-colData(sce0)$Barcode
-  m<-assay(sce0,"counts")
-  gg<-Matrix::rowSums(m)>0 #remove genes that are all zero
-  sce<-sce0[gg,]
-  m<-m[gg,]
-  cm<-colData(sce0)
-  bc<-substr(cm$Barcode,1,nchar(cm$Barcode)-2) #assumes barcode ends in "-1"
-  cm$bc_enc<-DropletUtils::encodeSequences(bc)
-  mi0<-as.data.frame(rhdf5::h5dump(mol_info_h5))
-  if(!all(cm$bc_enc %in% mi0$barcode)){
-    stop("Some count matrix barcodes not found in molecule information file!")
+##### BIC functions #####
+
+#throughout, m is the expression matrix with features=rows, samples=cols
+
+mult_bic<-function(m){
+  #multinomial model
+  n<-colSums(m)
+  p<-rowSums(m)/sum(n)
+  ll<-sum(apply(m,2,dmultinom,prob=p,log=TRUE))
+  df<-length(p)-1
+  -2*ll+df*log(prod(dim(m)))
+}
+
+dmn_bic<-function(m){
+  fit<-DirichletMultinomial::dmn(t(m),1)
+  alpha<-drop(fit@fit$Estimate)
+  ll<-sum(extraDistr::ddirmnom(t(m), colSums(m), alpha, log = TRUE))
+  -2*ll+nrow(m)*log(prod(dim(m)))
+}
+
+poi_bic<-function(m){
+  #poisson
+  sz<-colMeans(m)
+  lam<-rowSums(m)/sum(sz)
+  mu<-outer(lam,sz)
+  ll<-sum(dpois(m,mu,log=TRUE))
+  df<-length(lam)
+  -2*ll+df*log(prod(dim(m)))
+}
+
+nb_fit<-function(m){
+  #neg binom
+  sz<-colMeans(m)
+  offsets<-log(sz)
+  f<-function(x){
+    fit<-MASS::glm.nb(x~offset(offsets))
+    c(theta=fit$theta,ll=logLik(fit))
   }
-  gidx<-read.table(file.path(counts_folder,"genes.tsv"),stringsAsFactors=FALSE)[,1]
-  mi<-subset(mi0, barcode %in% cm$bc_enc & gene<length(gidx))
-  mi$gene_symbol<-gidx[mi$gene+1]
-  cm2<-cm[,c("bc_enc","Barcode")]
-  colnames(cm2)<-c("barcode","barcode_str")
-  mi<-merge(mi,cm2,by="barcode")
-  rc<-DropletUtils::makeCountMatrix(mi$gene_symbol,mi$barcode_str,value=mi$reads)
-  rc<-rc[rownames(m),colnames(m)]
-  #umi<-DropletUtils::makeCountMatrix(mi$gene_symbol,mi$barcode_str)
-  #umi<-umi[rownames(m),colnames(m)]
-  #umi counts from molecule info file consistent with sce
-  #all(m==umi)
-  if(!all((rc>0) == (m>0) )){
-    stop("zero pattern inconsistent between counts matrix and molecule info")
+  as.data.frame(t(apply(m,1,f)))
+}
+
+nb_bic<-function(m,prefit=NULL){
+  if(is.null(prefit)){ 
+    prefit<-nb_fit(m) 
+  } else {
+    stopifnot(nrow(m)==nrow(prefit))
   }
-  if(!all(rc>=m)){
-    stop("Read counts not all >= UMI counts")
+  ll<-sum(prefit$ll)
+  df<-2*nrow(m)
+  -2*ll+df*log(prod(dim(m)))
+}
+
+zip_fit<-function(m){
+  #zero inflated poisson
+  sz<-colMeans(m)
+  offsets<-log(sz)
+  f<-function(x){
+    fit<-pscl::zeroinfl(x~offset(offsets) | 1,dist="poisson")
+    c(pz=plogis(coef(fit)[2]),ll=logLik(fit))
   }
-  assay(sce,"read_counts")<-rc
-  sce
+  as.data.frame(t(apply(m,1,f)))
+}
+
+zip_bic<-function(m,prefit=NULL){
+  if(is.null(prefit)){ 
+    prefit<-zip_fit(m) 
+  } else {
+    stopifnot(nrow(m)==nrow(prefit))
+  }
+  ll<-sum(prefit$ll)
+  df<-2*nrow(m)
+  -2*ll+df*log(prod(dim(m)))
+}
+
+normal_bic<-function(m){
+  sz<-colMeans(m)
+  lam<-rowSums(m)/sum(sz)
+  mu<-outer(lam,sz)
+  r<-m-mu
+  s<-apply(r,1,sd)
+  z<-r/s
+  ll<-sum(dnorm(z,mean=0,sd=1,log=TRUE))
+  df<-2*nrow(m)
+  -2*ll+df*log(prod(dim(m)))
+}
+
+ziln_bic<-function(m){
+  #zero inflated log-normal (hurdle model)
+  Z<-m>0
+  p<-rowMeans(Z)
+  ll1<-sum(dbinom(Z,1,p,log=TRUE))
+  sz<-colMeans(m)
+  lra<-t(t(log(m))-log(sz))
+  lra[is.infinite(lra)]<-NA
+  mu<-rowMeans(lra,na.rm=TRUE)
+  r<-lra-mu
+  s<-apply(r,1,sd,na.rm=TRUE)
+  z<-r/s
+  ll2<-sum(dnorm(z[!is.na(z)],mean=0,sd=1,log=TRUE))
+  df<-3*nrow(m)
+  N<-prod(dim(m))
+  -2*(ll1+ll2)+df*log(N+sum(Z))
+}
+
+bic_all<-function(m,liks=c("mult","dmn","poi","nb","zip","normal","ziln")){
+  f<-function(x){eval(call(paste0(x,"_bic"),m))}
+  sapply(liks,f)
 }

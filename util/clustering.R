@@ -3,7 +3,9 @@ library(Seurat)
 library(mclust)
 
 seurat_cluster_inner<-function(seu,dims,res){
-  seu<-FindClusters(seu,dims.use=1:dims,resolution=res,print.output=0)
+  seu<-FindNeighbors(seu,dims=1:dims,verbose=FALSE)
+  seu<-FindClusters(seu,resolution=res,verbose=FALSE)
+  #seu<-FindClusters(seu,dims.use=1:dims,resolution=res,print.output=0)
   ans<-FetchData(seu,"ident")
   colnames(ans)<-"cluster"
   ans$cell<-rownames(ans)
@@ -17,9 +19,10 @@ seurat_cluster_inner<-function(seu,dims,res){
 }
 
 seurat_cluster<-function(embed,dims=ncol(embed),res=c(0.1,0.5,1.0)){
-  seu<-CreateSeuratObject(raw.data=t(embed),is.expr=-Inf) #placeholder object
-  seu<-SetDimReduction(seu,reduction.type="pca",slot="cell.embeddings",new.data=as.matrix(embed))
-  seu<-SetDimReduction(seu,reduction.type="pca",slot="key",new.data="PC")
+  seu<-CreateSeuratObject(t(embed)) #placeholder object
+  seu[["pca"]]<-CreateDimReducObject(as.matrix(embed),key="PC_",assay=DefaultAssay(seu))
+  #seu<-SetDimReduction(seu,reduction.type="pca",slot="cell.embeddings",new.data=as.matrix(embed))
+  #seu<-SetDimReduction(seu,reduction.type="pca",slot="key",new.data="PC")
   pars<-expand.grid(res=res,dims=dims)
   f<-function(i){seurat_cluster_inner(seu,pars$dims[i],pars$res[i])}
   ans<-do.call(rbind,lapply(1:nrow(pars),f))
