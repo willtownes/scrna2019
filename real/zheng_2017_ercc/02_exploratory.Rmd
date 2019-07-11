@@ -10,7 +10,7 @@ ERCC spike ins
 ```{r}
 library(SingleCellExperiment)
 library(cowplot)
-#library(ggplot2)
+#library(ggplot2); theme_set(theme_bw())
 library(Matrix)
 source("./util/functions.R")
 source("./algs/existing.R")
@@ -25,45 +25,6 @@ if(!dir.exists(pth)){
 sp<-TRUE #save plots?
 ggs<-function(plt,w=6,h=4,...){
   if(sp){ ggsave(file=fp(pth,plt),width=w,height=h,...) }
-}
-```
-
-useful functions
-
-```{r}
-Down_Sample_Matrix<-function(expr_mat){
-  #adapted from https://hemberg-lab.github.io/scRNA.seq.course/cleaning-the-expression-matrix.html#normalisations
-  min_lib_size<-min(colSums(expr_mat))
-  down_sample<-function(x){
-    prob <- min_lib_size/sum(x)
-    unlist(lapply(x,function(y){rbinom(1, y, prob)}))
-  }
-  apply(expr_mat, 2, down_sample)
-}
-
-score_test<-function(x,m){
-  #x a vector of count data
-  #m a vector of multiplicative offsets (log(m) is the offset in glm terms)
-  #computes a score test statistic for zero inflation from (van den Broek 1995)
-  #test statistic is distributed as chisquare(1). 
-  #Rejection of null means simple poisson insufficient, may be zero inflated/ overdispersed
-  #model is x[i]~poisson(m[i]*lambda)
-  lambda<-sum(x)/sum(m) #Poisson MLE, scalar
-  mu<-lambda*m #Poisson mean, adjusted for offset, vector
-  p0<-exp(-mu) #predicted probability of zero, vector
-  z<- x==0
-  num<-sum((z-p0)/p0)^2
-  denom<-sum((1-p0)/p0)-sum(mu)
-  num/denom #test statistic as chisq(1), high value=more zero inflation
-}
-
-lr_test<-function(x,m){
-  if(min(x)>0){
-    return(0)
-  }
-  full<-pscl::zeroinfl(x ~ 1 | 1, dist="poisson",offset=log(m))
-  reduced<-glm(x~1,family="poisson",offset=log(m))
-  2*as.numeric(logLik(full)-logLik(reduced))
 }
 ```
 
@@ -133,14 +94,19 @@ ggs("counts_vs_log_cpm_histograms_ercc.pdf",w=7.5,h=5)
 Library Size/ Fraction of Zeros dominates first PC even after normalization/ log transform
 
 ```{r}
+factors<-pca(Ycpm,2)
+pd<-cbind(factors,zero_frac=pz,log_total_umi=z)
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
 factors<-pca(Yl2,10)
 pd<-cbind(factors[,1:5],zero_frac=pz,log_total_umi=z)
+round(cor(pd[,colnames(pd)!="cl"]),1)
 if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
 ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
 ggs("log_cpm_pca12_zerofrac_ercc.pdf")
 ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
 ggs("log_cpm_pca1_zerofrac_total_umi_ercc.pdf")
-round(cor(pd[,colnames(pd)!="cl"]),1)
+
 
 #apply clustering to the result of PCA
 cl<-seurat_cluster(factors,res=0.5)
@@ -238,68 +204,4 @@ for(p in plx2){
   print(ggplot(subset(pd2,perplexity==p),aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")+ggtitle(paste("perplexity=",p)))
 }
 dev.off()
-```
-
-Check for zero inflation. We fit a score test and a likelihood ratio test to assess whether there is zero inflation. In both cases, the null hypothesis is that the Poisson model is sufficient. For the likelihood ratio test, the alternative model is the zero inflated Poisson.
-
-```{r}
-#downsample to normalize droplet size (total UMI)
-Yds<-Down_Sample_Matrix(Y[,colSums(Y)>10000])
-#variance=mean, suggests poisson
-m<-rowMeans(Yds); v<-apply(Yds,1,var)
-summary(v/m)
-plot(log(m),log(v),xlab="log(mean)",ylab="log(var)")
-abline(0,1)
-
-N<-median(colSums(Yds))
-predict_zeros_binom<-function(x){(1-exp(x)/N)^N} #binomial
-predict_zeros_poi<-function(x){exp(-exp(x))}
-predict_zeros_nb<-function(x,phi=2){
-  exp(-phi*log1p(exp(x-log(phi))))
-}
-pd<-data.frame(log_mean=log(m),frac_zero=rowMeans(Yds==0))
-xlo<-min(pd$log_mean[pd$log_mean>-Inf])
-xhi<-max(pd$log_mean)
-xcv<-data.frame(x=c(xlo,xhi))
-ggplot(xcv)+geom_point(data=pd,aes(x=log_mean,y=frac_zero),alpha=.5) +stat_function(aes(x,color="bin"),fun=predict_zeros_binom) +stat_function(aes(x,color="poi"),fun=predict_zeros_poi) #+scale_color_manual("model",breaks=c("bin","poi","nb"),values=c("blue","green","red"))
-
-pdf(fp(pth,"logmean_pzero_ercc.pdf"),width=6,height=4)
-#same plot but using base plot
-with(pd,plot(log_mean,frac_zero,xlab="log of mean expression",ylab="fraction of zero droplets",cex=2))
-curve(predict_zeros_binom,from=xlo,to=xhi,col="blue",lwd=5,add=TRUE)
-curve(predict_zeros_poi,from=xlo,to=xhi,col="green",lwd=4,lty=2,add=TRUE)
-legend("bottomleft",c("Multinomial","Poisson"),lty=c(1,1),lwd=c(5,4),col=c("blue","green"))
-dev.off()
-```
-
-hypothesis testing of whether there is zero inflation
-
-```{r}
-thresh<-qchisq(.05/nrow(Yds),1,lower.tail=FALSE)
-s<-apply(Yds,1,score_test,colMeans(Yds))
-hist(s)
-abline(v=thresh,lty=2)
-table(s>thresh)
-l<-apply(Yds,1,lr_test,colMeans(Yds))
-hist(l)
-abline(v=thresh,lty=2)
-table(l>thresh)
-
-pd$zero_inflated<-ifelse(l>thresh,"zero_inflated","normal")
-#predict_zeros<-function(x){exp(-exp(x))} #poisson
-predict_zeros<-function(x){(1-exp(x)/N)^N} #binomial
-ggplot(pd)+stat_function(data=data.frame(x=c(min(pd$log_mean),max(pd$log_mean))),aes(x),fun=predict_zeros)+xlab("log of mean expression")+ylab("fraction of zero droplets")+geom_point(aes(x=log_mean,y=frac_zero))#,colour=zero_inflated))+scale_color_manual(breaks=c("normal","zero_inflated"),values=c("blue","red"))
-#ggs("logmean_pzero_binom_ercc.pdf")
-```
-
-We rejected the null hypothesis of no zero inflation for several ERCCs (red points in the above graph). This is because the large sample size (number of cells) allows even small differences in predicted vs actual number of zeros to be "significant". None of the "significantly zero inflated" ERCCs deviate from the Poisson prediction by more than about 0.1.
-
-```{r}
-zi<-which.max(s)
-(actual<-mean(Yds[zi,]==0))
-(theor<-exp(-mean(Yds[zi,])))
-```
-
-```{r}
-sessionInfo()
 ```

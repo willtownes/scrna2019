@@ -61,8 +61,11 @@ pd1<-subset(pd,method=="seurat" & num_genes==1500 & k>=floor(.75*ktrue) & k<=cei
 pd1$dims<-plyr::mapvalues(pd1$dims,from=c(10,30),to=c("10 dimensions","30 dimensions"))
 pd1$genefilter<-plyr::mapvalues(pd1$genefilter,from=c("dev","expr","hvg"),to=c("Deviance","Highly expressed","Highly variable"))
 #pd1$dimreduce<-factor(pd1$dimreduce,levels=c("glmpca","pca_rd","pca_rp","pca_log","zinbwave"))#,ordered=TRUE)
-ggplot(pd1,aes(x=genefilter,y=ari,fill=dimreduce,colour=dimreduce))+geom_boxplot()+facet_grid(dims~dat)+theme_bw()+ylab("adjusted Rand Index")+xlab("feature selection")+theme(axis.text.x=element_text(angle=15,hjust=1))
+ggplot(pd1,aes(x=genefilter,y=ari,fill=dimreduce,colour=dimreduce))+geom_boxplot()+facet_grid(dims~dat,scales="free")+theme_bw()+ylab("adjusted Rand Index")+xlab("feature selection")+theme(axis.text.x=element_text(angle=15,hjust=1))
 ggs("seurat_G1500_all.pdf")
+#same plot but using silhouette width as criteria
+ggplot(pd1,aes(x=genefilter,y=silhouette,fill=dimreduce,colour=dimreduce))+geom_boxplot()+facet_grid(dims~dat,scales="free")+theme_bw()+ylab("silhouette coefficient")+xlab("feature selection")+theme(axis.text.x=element_text(angle=15,hjust=1))
+ggs("seurat_G1500_all_silhouette.pdf")
 ```
 
 Seurat only, deviance only, datasets 4eq and 8eq, no highly expressed genes, no pearson residuals
@@ -74,6 +77,8 @@ d2$dimreduce<-plyr::mapvalues(d2$dimreduce,from="Deviance residual PCA",to="Dev.
 d2$dims<-plyr::mapvalues(d2$dims,from=c(10,30),to=c("10 dimensions","30 dimensions"))
 ggplot(subset(d2,genefilter=="Deviance"),aes(x=dimreduce,y=ari,fill=dimreduce,colour=dimreduce))+geom_boxplot()+theme_bw()+facet_grid(dims~dat)+theme(axis.text.x=element_text(angle=20,hjust=1),axis.title.x=element_blank(),legend.position = "none")+ylab("adjusted Rand index")
 ggs("benchmark_dimreduce.pdf")
+ggplot(subset(d2,genefilter=="Deviance"),aes(x=dimreduce,y=silhouette,fill=dimreduce,colour=dimreduce))+geom_boxplot()+theme_bw()+facet_grid(dims~dat)+theme(axis.text.x=element_text(angle=20,hjust=1),axis.title.x=element_blank(),legend.position = "none")+ylab("silhouette coefficient")
+ggs("benchmark_dimreduce_silhouette.pdf")
 ```
 
 GLM-PCA and Log-CPM PCA showing Deviance vs HVG for Feature Selection
@@ -84,6 +89,8 @@ d2b$genefilter<-factor(d2b$genefilter)
 d2b$genefilter<-plyr::mapvalues(d2b$genefilter,from="Highly variable",to="Highly variable genes")
 ggplot(d2b, aes(x=dimreduce,y=ari,fill=genefilter,colour=genefilter)) +geom_boxplot()+facet_wrap(~dat,scales="fixed",nrow=1) +theme_bw()+ylab("adjusted Rand index") +theme(legend.position="bottom", axis.title.x=element_blank())+labs(fill=NULL,color=NULL)#+labs(fill="feature selection",colour="feature selection")
 ggs("benchmark_featselect.pdf",h=2.5)
+ggplot(d2b, aes(x=dimreduce,y=silhouette,fill=genefilter,colour=genefilter)) +geom_boxplot()+facet_wrap(~dat,scales="fixed",nrow=1) +theme_bw()+ylab("silhouette coefficient")+theme(legend.position="bottom", axis.title.x=element_blank())+labs(fill=NULL,color=NULL)#+labs(fill="feature selection",colour="feature selection")
+ggs("benchmark_featselect_silhouette.pdf",h=2.5)
 ```
 
 Kmeans only, compare feat select Deviance vs HVG and dimreduce GLM-PCA vs Log-CPM PCA.
@@ -100,6 +107,8 @@ colnames(d3)[colnames(d3)=="method"]<-"clustering"
 ggplot(d3,aes(x=genefilter,y=ari,fill=dimreduce,colour=dimreduce))+geom_boxplot()+facet_grid(dims~dat)+theme_bw()+ylab("adjusted Rand index")+xlab("feature selection")
 #ggplot(d3,aes(x=method,y=ari,fill=method,colour=method))+geom_boxplot()+facet_grid(dims~dat)+theme_bw()+ylab("adjusted Rand index")
 ggs("benchmark_kmeans.pdf")
+ggplot(d3,aes(x=genefilter,y=silhouette,fill=dimreduce,colour=dimreduce))+geom_boxplot()+facet_grid(dims~dat)+theme_bw()+ylab("silhouette coefficient")+xlab("feature selection")
+ggs("benchmark_kmeans_silhouette.pdf")
 ```
 
 ### Old Stuff

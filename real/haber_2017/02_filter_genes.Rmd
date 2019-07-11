@@ -1,0 +1,59 @@
+---
+title: "Haber et al 2017"
+author: "Will Townes"
+output: html_document
+---
+
+```{r}
+library(ggplot2); theme_set(theme_bw())
+#suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./util/functions_genefilter.R") #meanvar_plotdata function
+
+fp<-file.path
+bp<-"./real/haber_2017"
+
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+```
+
+data loading
+
+```{r}
+sce<-readRDS(fp(bp,"data/01_eec.rds"))
+```
+
+```{r}
+pd<-meanvar_plotdata(sce,G=1000)
+ggplot(pd,aes(x=m,y=vmr,colour=criteria))+geom_point(alpha=.9)+xlab("average normalized expression") +ylab("variance to mean ratio") +theme(legend.position=c(0.2,.8))+scale_color_manual(values=c("orange","red","blue","gray"))+scale_x_log10()+scale_y_log10()
+#+scale_size_manual(values=c(1,1,1,.5))+scale_y_log10() #size=criteria, legend.position=c(.5,.2)
+ggsave(file=fp(pth,"haber_mean_var.pdf"),width=6,height=4)
+```
+
+```{r}
+rk<-pd[,c("dev","expr","hvg")]
+#spearman rank correlations of the criteria
+cor(rk,method="spearman") #poisson, binomial deviance almost identical
+```
+
+```{r}
+#plot made in response to Joshua Batson twitter comment, see also
+#http://ds.czbiohub.org/blog/The-Effect-of-PCR-on-scRNAseq/
+
+rk<-rk[rownames(sce),]
+m<-counts(sce)
+pd2<-data.frame(rel_abundance=rowSums(m)/sum(m),devb=rk$dev)
+G<-1000
+pd2$topdeviance<-pd2$dev<=G
+pd2$pct_cells_nz<-rowMeans(m>0)
+pd2<-subset(pd2,pct_cells_nz>0 & rel_abundance>0)
+pd2<-pd2[order(pd2$topdeviance,decreasing=TRUE),]
+ggplot(pd2,aes(x=rel_abundance,y=pct_cells_nz,colour=topdeviance,size=topdeviance))+geom_point(alpha=.5)+scale_x_log10()+scale_y_log10()+theme_bw()+scale_colour_manual(values=c("black","red"))+scale_size_manual(values=c(1,2))#+scale_alpha_manual(values=c(.5,1))
+```
+
+# Session information
+
+```{r}
+sessionInfo()
+```

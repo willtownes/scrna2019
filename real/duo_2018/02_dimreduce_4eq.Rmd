@@ -1,0 +1,197 @@
+---
+title: "Duo et al 2018 Zheng4eq clusters"
+author: "Will Townes"
+output: html_document
+---
+
+assumes 01_filter_genes.Rmd has been run and informative gene ranks are stored in data/genefilter_ranks_4eq.txt.
+
+```{r}
+library(tidyverse); theme_set(theme_bw())
+suppressPackageStartupMessages(library(SingleCellExperiment))
+#library(Seurat)
+library(mclust)
+library(DuoClustering2018)
+source("./real/util/functions_dimreduce.R") #loads glmpca, existing, and util/functions
+ari<-mclust::adjustedRandIndex
+jac<-function(x,y){
+  clusteval::cluster_similarity(x,y,similarity="jaccard")
+}
+fp<-file.path
+bp<-"./real/duo_2018"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-TRUE #save plots?
+if(!dir.exists(fp(bp,"data"))) dir.create(fp(bp,"data"))
+if(!dir.exists(fp(bp,"embeddings"))) dir.create(fp(bp,"embeddings"))
+```
+
+## Data Loading
+
+```{r}
+J<-2000
+sce<-sce_full_Zhengmix4eq()
+rk<-read.table(fp(bp,"data","genefilter_ranks_4eq.txt"))
+sce_d<-sce[rownames(rk)[rk$devb<=J],]
+sce_h<-sce[rownames(rk)[rk$hvg<=J],]
+```
+
+## Dimension reductions
+
+```{r}
+L<-2
+res_d<-dimreduce_all(counts(sce_d),L)
+write.table(res_d$factors,fp(bp,"embeddings/zheng4eq_dev_G2000_L2.txt"),quote=FALSE,row.names=FALSE)
+res_h<-dimreduce_all(counts(sce_h),L)
+write.table(res_h$factors,fp(bp,"embeddings/zheng4eq_hvg_G2000_L2.txt"),quote=FALSE,row.names=FALSE)
+
+tt<-format_elapsed(res_d$elapsed,res_h$elapsed)
+write.table(tt,fp(bp,"results/elapsed_zheng4eq_G2000_L2.txt"),quote=FALSE,row.names=FALSE)
+```
+
+### Make plots of dimension reductions
+
+```{r}
+sce<-sce_full_Zhengmix4eq()
+cm<-as.data.frame(colData(sce))
+cm<-data.frame(cell_id=rownames(cm),celltype=cm$phenoid)
+res_d<-read.table(fp(bp,"embeddings/zheng4eq_dev_G2000_L2.txt"),header=TRUE)
+res_h<-read.table(fp(bp,"embeddings/zheng4eq_hvg_G2000_L2.txt"),header=TRUE)
+res_d$genefilter<-"dev"
+res_h$genefilter<-"hvg"
+theirs<-c("pca_log","zinbwave")
+pd<-rbind(subset(res_d,!(dimreduce %in% theirs)),subset(res_h,dimreduce %in% theirs))
+pd<-merge(pd,cm)
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point()+facet_wrap(~dimreduce,scales="free")
+if(sp){ ggsave(fp(pth,"zheng4eq_dimreduce.pdf"),width=7,height=4) }
+```
+
+### Duo clustering performance summaries
+
+```{r}
+sn<-"Zhengmix4eq"
+for(vg in c("Expr10","HVG10")){
+  n<-paste0("clustering_summary_filtered",vg,"_",sn,"_v2")
+  m<-do.call(n,list())
+  m_ari<-m %>% group_by(method,run,k,resolution) %>% summarise(ari=ari(cluster,trueclass)) %>% filter(!is.nan(ari))
+  max(m_ari$ari)
+  #top score for each method
+  print(m_ari %>% group_by(method) %>% summarise(i=which.max(ari),run=run[i],k=k[i],resolution=resolution[i],ari=ari[i]) %>% arrange(desc(ari)))
+}
+```
+
+### PCA
+
+using log2(1+CPM)
+
+```{r}
+L<-2; K<-4
+system.time(factors<-pca(Yl2,L)) #7sec
+sz<-colSums(Y)
+pd<-cbind(factors,celltype=cm$phenoid,pz=colMeans(Y==0),z=log10(sz))
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point()
+if(sp) ggsave(fp(pth,"zheng4eq_log1p_pca12.pdf"),width=6,height=4)
+ggplot(pd,aes(x=pz,y=dim1,colour=celltype))+geom_point(show.legend = FALSE)+xlab("fraction of zeros")
+if(sp) ggsave(fp(pth,"zheng4eq_log1p_pz_pc1.pdf"),width=4,height=4)
+ggplot(pd,aes(x=z,y=pz,colour=celltype))+geom_point()
+round(cor(pd[,colnames(pd)!="celltype"]),1) #cor(dim1,pz)=0.6
+cl<-kmeans(factors,K,nstart=25)$cl
+table(pd$celltype,cl)
+ari(cl,pd$celltype) #.36
+mcl_res<-Mclust(factors,K)
+ari(mcl_res$classification,pd$celltype) #.36
+```
+
+using deviance residuals
+
+```{r}
+L<-2; K<-4
+system.time(pc0<-pca(Ydr,L,ret_obj=TRUE,center=TRUE,scale=TRUE)) #6sec
+factors<-pc0$factors; pc<-pc0$obj
+sz<-colMeans(Y)
+pd<-cbind(factors,celltype=cm$phenoid,pz=colMeans(Y==0),z=log10(sz))
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point(show.legend=TRUE)
+if(sp) ggsave(fp(pth,"zheng4eq_dr_pca12.pdf"),width=6,height=4)
+ggplot(pd,aes(x=pz,y=dim1,colour=celltype))+geom_point(show.legend=FALSE)
+if(sp) ggsave(fp(pth,"zheng4eq_dr_pz_pc1.pdf"),width=4,height=4)
+kmeans_res<-kmeans(factors,K,nstart=25)
+cl<-kmeans_res$cluster
+ari(cl,pd$celltype) #.89
+km_mu<-as.data.frame(kmeans_res$centers)
+ggplot(pd,aes(x=dim1,y=dim2))+geom_point(aes(colour=celltype),size=.5)+geom_point(data=km_mu,shape="x",colour="black",size=5)+ggtitle("PCA on Fractions with k-means centers")
+
+mcl_res<-Mclust(factors,K)
+summary(mcl_res)
+ari(mcl_res$classification,pd$celltype) #.87
+mcl_mu<-as.data.frame(t(mcl_res$parameters$mean))
+ggplot(pd,aes(x=dim1,y=dim2))+geom_point(aes(colour=celltype),size=.5)+geom_point(data=mcl_mu,shape="x",colour="black",size=5)+ggtitle("PCA on Fractions with mclust centers")
+```
+
+GLM-PCA: Poisson likelihood
+
+```{r}
+L<-2; K<-4
+system.time(res<-glmpca(Y,L,fam="poi",verbose=TRUE)) #47 sec, 27 iter
+plot(res$dev,type="l",log="y")
+factors<-res$factors
+
+sz<-colMeans(Y)
+pd<-cbind(factors,celltype=cm$phenoid,pz=colMeans(Y==0),z=log10(sz))
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point(show.legend=TRUE)
+if(sp) ggsave(fp(pth,"zheng4eq_glmpca12.pdf"),width=6,height=4)
+ggplot(pd,aes(x=pz,y=dim1,colour=celltype))+geom_point(show.legend=FALSE)
+if(sp) ggsave(fp(pth,"zheng4eq_pz_glmpca1.pdf"),width=4,height=4)
+kmeans_res<-kmeans(factors,K,nstart=25)
+cl<-kmeans_res$cluster
+ari(cl,pd$celltype) #.85
+mcl_res<-Mclust(factors,K)
+ari(mcl_res$classification,pd$celltype) #.92
+```
+
+GLM-PCA: negative binomial likelihood
+
+```{r}
+L<-2; K<-4
+system.time(res<-glmpca(Y,L,fam="nb",verbose=TRUE,nb_theta=100)) #52 iter, 3.6 min
+plot(res$dev,type="l",log="y")
+factors<-res$factors
+
+sz<-colMeans(Y)
+pd<-cbind(factors,celltype=cm$phenoid,pz=colMeans(Y==0),z=log10(sz))
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point(show.legend=TRUE)
+if(sp) ggsave(fp(pth,"zheng4eq_glmpca_nb12.pdf"),width=6,height=4)
+ggplot(pd,aes(x=pz,y=dim1,colour=celltype))+geom_point(show.legend=FALSE)
+if(sp) ggsave(fp(pth,"zheng4eq_pz_glmpca_nb1.pdf"),width=4,height=4)
+kmeans_res<-kmeans(factors,K,nstart=25)
+cl<-kmeans_res$cluster
+ari(cl,pd$celltype) #.89
+mcl_res<-Mclust(factors,K)
+ari(mcl_res$classification,pd$celltype) #.93
+```
+
+ZINB-WAVE
+
+```{r}
+L<-2; K<-4
+system.time(factors<-zinbwave(Y,L)) #33 min
+
+sz<-colMeans(Y)
+pd<-cbind(factors,celltype=cm$phenoid,pz=colMeans(Y==0),z=log10(sz))
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point(show.legend=TRUE)
+if(sp) ggsave(fp(pth,"zheng4eq_zinbwave12.pdf"),width=6,height=4)
+ggplot(pd,aes(x=pz,y=dim1,colour=celltype))+geom_point(show.legend=FALSE)
+if(sp) ggsave(fp(pth,"zheng4eq_pz_zinbwave1.pdf"),width=4,height=4)
+kmeans_res<-kmeans(factors,K,nstart=25)
+cl<-kmeans_res$cluster
+ari(cl,pd$celltype) #.89
+mcl_res<-Mclust(factors,K)
+ari(mcl_res$classification,pd$celltype) #.94
+```
+
+# Session information
+
+```{r}
+sessionInfo()
+```

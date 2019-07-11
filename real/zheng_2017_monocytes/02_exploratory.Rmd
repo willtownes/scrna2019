@@ -102,14 +102,19 @@ ggs("counts_vs_log_cpm_histograms_monocytes.pdf",w=7.5,h=5)
 Library Size/ Fraction of Zeros dominates first PC even after normalization/ log transform
 
 ```{r}
+factors<-pca(Ycpm[ss,],2)
+pd<-cbind(factors,zero_frac=pz,log_total_umi=z)
+round(cor(pd[,colnames(pd)!="cl"]),1)
+
 factors<-pca(Yl2[ss,],10)
 pd<-cbind(factors[,1:3],zero_frac=pz,log_total_umi=z)
+round(cor(pd[,colnames(pd)!="cl"]),1)
 if(cor(pd$zero_frac,pd$dim1)<0) pd$dim1<- -pd$dim1
 ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuous(low="blue",high="red")
 ggs("log_cpm_pca12_zerofrac_monocytes.pdf")
 ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
 ggs("log_cpm_pca1_zerofrac_total_umi_monocytes.pdf")
-round(cor(pd[,colnames(pd)!="cl"]),1)
+
 
 #apply clustering to the result of PCA
 cl<-seurat_cluster(factors,res=0.5)
@@ -200,16 +205,6 @@ dev.off()
 Show relationship between mean expression and probability of zero follows multinomial prediction.
 
 ```{r}
-Down_Sample_Matrix<-function(expr_mat){
-  #adapted from https://hemberg-lab.github.io/scRNA.seq.course/cleaning-the-expression-matrix.html#normalisations
-  min_lib_size<-min(colSums(expr_mat))
-  down_sample<-function(x){
-    prob <- min_lib_size/sum(x)
-    unlist(lapply(x,function(y){rbinom(1, y, prob)}))
-  }
-  apply(expr_mat, 2, down_sample)
-}
-
 #downsample to normalize droplet size (total UMI)
 Yds<-Down_Sample_Matrix(Y)
 Yds<-Yds[rowSums(Yds)>0,]
@@ -241,39 +236,4 @@ curve(predict_zeros_poi,from=xlo,to=xhi,col="green",lwd=3,lty=2,add=TRUE)
 curve(predict_zeros_nb(x,phi=4),from=xlo,to=xhi,col="red",lwd=3,lty=3,add=TRUE)
 legend("bottomleft",c("Multinomial","Poisson","Negative Binomial"),lty=c(1,2,3),lwd=c(4,3,3),col=c("blue","green","red"))
 dev.off()
-```
-
-testing for zero inflation
-
-```{r}
-score_test<-function(x,m){
-  #x a vector of count data
-  #m a vector of multiplicative offsets (log(m) is the offset in glm terms)
-  #computes a score test statistic for zero inflation from (van den Broek 1995)
-  #test statistic is distributed as chisquare(1). 
-  #Rejection of null means simple poisson insufficient, may be zero inflated/ overdispersed
-  #model is x[i]~poisson(m[i]*lambda)
-  lambda<-sum(x)/sum(m) #Poisson MLE, scalar
-  mu<-lambda*m #Poisson mean, adjusted for offset, vector
-  p0<-exp(-mu) #predicted probability of zero, vector
-  z<- x==0
-  num<-sum((z-p0)/p0)^2
-  denom<-sum((1-p0)/p0)-sum(mu)
-  num/denom #test statistic as chisq(1), high value=more zero inflation
-}
-
-#hypothesis testing of whether there is zero inflation
-thresh<-qchisq(.05/nrow(Yds),1,lower.tail=FALSE)
-s<-apply(Yds,1,score_test,colMeans(Yds))
-hist(s)
-abline(v=thresh,lty=2)
-table(s>thresh)
-
-pd$zero_inflated<-ifelse(s>thresh,"zero_inflated","normal")
-#predict_zeros<-function(x){exp(-exp(x))} #poisson
-ggplot(xcv)+xlab("log of mean expression")+ylab("fraction of zero droplets")+geom_point(data=pd,size=1,aes(x=log_mean,y=frac_zero,colour=zero_inflated))+scale_color_manual(breaks=c("normal","zero_inflated"),values=c("blue","red"))+stat_function(aes(x),fun=predict_zeros_binom)
-```
-
-```{r}
-sessionInfo()
 ```

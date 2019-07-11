@@ -1,0 +1,57 @@
+---
+title: "Tung et al data loading"
+author: "Will Townes"
+date: "11/17/2016"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages(library(SingleCellExperiment))
+fp<-file.path
+bp<-"./real/tung_2016"
+dp<-fp(bp,"data")
+```
+
+## Download data files
+
+The key repository is https://github.com/jdblischak/singleCellSeq
+
+```{bash}
+pushd real/tung_2016
+wget https://github.com/jdblischak/singleCellSeq/raw/master/data/annotation.txt -P data
+wget https://github.com/jdblischak/singleCellSeq/raw/master/data/molecules.txt -P data
+wget https://github.com/jdblischak/singleCellSeq/raw/master/data/reads.txt -P data
+wget https://github.com/jdblischak/singleCellSeq/raw/master/data/quality-single-cells.txt -P data
+popd
+```
+
+For loading the data files, we just use the [code provided by the authors](https://jdblischak.github.io/singleCellSeq/analysis/compare-reads-v-molecules.html).
+
+```{r}
+rt<-function(x){read.table(x,header=TRUE,stringsAsFactors=FALSE)}
+anno<-rt(fp(dp,"annotation.txt"))
+reads<-as.matrix(rt(fp(dp,"reads.txt")))
+molecules<-as.matrix(rt(fp(dp,"molecules.txt")))
+#reads<-reads*(molecules>0)
+quality_single_cells<-scan(fp(dp,"quality-single-cells.txt"),what="character")
+#create SingleCellExperiment object
+sce<-SingleCellExperiment(assays=SimpleList(counts=molecules,read_counts=reads),colData=anno)
+#Keep only the single cells that passed their QC filters.
+sce<-sce[,quality_single_cells]
+# Remove ERCC and genes with all zeros
+ercc<-grepl("^ERCC",rownames(sce))
+gg<-rowSums(assay(sce,"read_counts"))>0
+sce<-sce[gg & !ercc,]
+meta<-colData(sce)
+sce<-sce[,order(rownames(meta))] #order by sample ID
+saveRDS(sce,file=fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+optionally remove the text files used to generate the RDS to save disk space
+
+```{r}
+fls<-c("annotation","molecules","quality-single-cells","reads")
+for(f in fls){
+  file.remove(fp(dp,paste0(f,".txt")))
+}
+```

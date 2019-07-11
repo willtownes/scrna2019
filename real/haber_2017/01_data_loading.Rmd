@@ -1,0 +1,65 @@
+---
+title: "Haber 2017 Enteroendocrine cells"
+author: "Will Townes"
+output: html_document
+---
+
+```{r}
+#library(SingleCellExperiment)
+source("./util/functions_genefilter.R")
+bp<-"./real/haber_2017"
+fp<-file.path
+```
+
+#### Overview 
+This is the code to produce a *SingleCellExperiment* object of the scRNA-Seq experiment by Haber et al. (2017) and GEO accession [GSE92332](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE92332). 
+
+#### Citation 
+Haber AL, Biton M, Rogel N, Herbst RH et al. A single-cell survey of the small intestinal epithelium. Nature 2017 Nov 16;551(7680):333-339. PMID: 29144463
+
+#### Description extracted from GEO: 
+To understand the diversity of cellular states within mouse intestinal epithelial tissue, we obtained whole intestines from wild type mice, dissagregated the samples, sorted into single cells and profiled them by single-cell RNA-seq.
+
+### Download Count Matrix
+
+focusing only on the enteroendocrine cells
+
+```
+pushd real/haber_2017
+mkdir -p data
+wget -P data ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE92nnn/GSE92332/suppl/GSE92332_EEC_UMIcounts.txt.gz
+gunzip data/GSE92332_EEC_UMIcounts.txt.gz
+```
+
+### Parse metadata and create sce object
+
+```{r}
+m<-read.table(fp(bp,"data/GSE92332_EEC_UMIcounts.txt"))
+cm<-strsplit(colnames(m),"_")
+cm<-t(matrix(unlist(cm),nrow=4))
+colnames(cm)<-c("barcode","batch","tissue","celltype")
+cm<-as.data.frame(cm)
+colnames(m)<-rownames(cm)<-cm$barcode
+cm$nUMI<-colSums(m)
+sce<-SingleCellExperiment(assays=list(counts=as.matrix(m)),colData=cm)
+saveRDS(sce,fp(bp,"data/01_eec.rds"))
+```
+
+### Normalization and Feature Selection
+
+Scran size factors
+
+```{r}
+sce<-readRDS(fp(bp,"data/01_eec.rds"))
+cl<-scran::quickCluster(sce)
+sce<-scran::computeSumFactors(sce,clusters=cl)
+sce<-scater::normalize(sce)
+```
+
+rank genes by HVG, deviance, and highly expressed
+
+```{r}
+gm<-rank_all_genes(sce)
+rowData(sce)<-gm
+saveRDS(sce,fp(bp,"data/01_eec.rds"))
+```

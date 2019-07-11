@@ -1,0 +1,93 @@
+---
+title: "Tung model selection"
+author: "Will Townes"
+output: html_document
+---
+
+Tung 2016 plate based UMI dataset
+
+```{r}
+suppressPackageStartupMessages(library(SingleCellExperiment))
+library(ggplot2); theme_set(theme_bw())
+source("./util/functions.R")
+fp<-file.path
+bp<-"./real/tung_2016"
+
+plt_dir<-fp(bp,"results/fig")
+if(!dir.exists(plt_dir)){ dir.create(plt_dir,recursive=TRUE) }
+sp<-TRUE #save plots?
+ggs<-function(plt,w=6,h=4,...){
+  if(sp){ ggsave(file=fp(plt_dir,plt),width=w,height=h,...) }
+}
+```
+
+Load UMI counts matrix and read counts matrix. For model comparison on negative control data, choose a single plate from one individual to ensure no batch effects.
+
+```{r}
+sce0<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+cm<-colData(sce0)
+set.seed(205) #reproducibility
+ssg<-sample.int(nrow(sce0),size=5000) #subset random genes
+sce<-sce0[ssg,cm$individual=="NA19098" & cm$replicate=="r3"]
+m<-as.matrix(assay(sce,"counts"))
+sz<-colSums(m)
+z<-log10(sz)
+pz<-colMeans(m==0)
+rc<-as.matrix(assay(sce,"read_counts"))
+rowmins<-apply(m,1,min)
+rowsd<-apply(m,1,sd)
+m2<-m[rowmins==0 & rowsd>1e-12,]
+rowmins<-apply(rc,1,min)
+rowsd<-apply(rc,1,sd)
+rc2<-rc[rowmins==0 & rowsd>1e-12,]
+print(dim(m2)) #3357 genes x 57 cells
+# Show there are highly expressed genes
+summary(rowMeans(m)) #values range up to 100-700
+```
+
+### Compare model fit for different likelihoods
+
+Likelihoods:
+* multinomial
+* Poisson
+* Dirichlet-multinomial
+* negative binomial
+* normal
+* zero inflated Poisson
+* zero inflated lognormal
+
+All likelihoods include column means as offset. Have to remove genes with no zero values in order to include zero inflated models in comparisons.
+
+```{r}
+system.time(res<-bic_all(m2))
+barplot(sort(res),xlab="likelihood",ylab="BIC",main="UMI counts",log="y")
+res_rc<-bic_all(rc2)
+barplot(sort(res_rc),xlab="likelihood",ylab="BIC",main="read counts")
+dd<-as.data.frame(res)
+colnames(dd)<-"BIC"
+dd$dat<-"umi_counts"
+dd$lik<-rownames(dd)
+dd2<-as.data.frame(res_rc)
+colnames(dd2)<-"BIC"
+dd2$dat<-"read_counts"
+dd2$lik<-rownames(dd2)
+dd<-rbind(dd,dd2)
+rownames(dd)<-NULL
+dd<-dd[,c(2,3,1)]
+write.table(dd,fp(bp,"results/gof_bic.txt"),quote=FALSE,row.names=FALSE)
+```
+
+The best performing likelihood is multinomial followed by Poisson and Dirichlet-multinomial for UMI counts.
+
+```{r}
+pd<-read.table(fp(bp,"results/gof_bic.txt"),header=TRUE)
+levels(pd$lik)[levels(pd$lik)=="normal"]<-"nml"
+plt_func<-function(d){
+  d$lik<-factor(d$lik,levels=d$lik[order(d$BIC)])
+  ggplot(d,aes(x=lik,y=BIC))+geom_point(size=3)+xlab("likelihood")
+}
+plt_func(subset(pd,dat=="umi_counts"))
+ggs("gof_bic_tung_umi.pdf",w=3,h=2)
+plt_func(subset(pd,dat=="read_counts"))
+ggs("gof_bic_tung_reads.pdf",w=3,h=2)
+```

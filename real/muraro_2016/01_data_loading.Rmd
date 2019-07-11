@@ -1,0 +1,99 @@
+---
+title: "Muraro 2016 Cel-Seq2 Pancreas"
+author: "Will Townes"
+output: html_document
+---
+
+```{r}
+suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./util/functions_genefilter.R")
+bp<-"./real/muraro_2016"
+fp<-file.path
+```
+
+#### Overview 
+This is the code to produce a *SingleCellExperiment* object of the scRNA-Seq experiment by Muraro et al. (2016) and GEO accession [GSE85241](https://www.ncbi.nlm.nih.gov/geo/query/acc.cgi?acc=GSE85241). 
+
+#### Citation 
+Muraro MJ, Dharmadhikari G, Grün D, Groen N et al. A Single-Cell Transcriptome Atlas of the Human Pancreas. Cell Syst 2016 Oct 26;3(4):385-394.e3. PMID: 27693023
+
+#### Description extracted from GEO: 
+To understand organ function it is important to have an inventory of the cell types present in the tissue and of the corresponding markers that identify them. This is a particularly challenging task for human tissues like the pancreas, since reliable markers are limited. Transcriptome-wide studies are typically done on pooled islets of Langerhans, which obscures contributions from rare cell types and/or potential subpopulations. To overcome this challenge, we developed an automated single-cell sequencing platform to sequence the transcriptome of thousands of single pancreatic cells from deceased organ donors, allowing in silico purification of all main pancreatic cell types. We identify cell type-specific transcription factors, a subpopulation of REG3A-positive acinar cells, and cell surface markers that allow sorting of live alpha and beta cells with high purity. This resource will be useful for developing a deeper understanding of pancreatic biology and pathophysiology of diabetes mellitus.
+
+## Obtaining the Data
+
+We emailed the first author (Muraro) at `m.muraro@hubrecht.eu` . He explained we can download the UMI counts and the annotations from the link:
+
+https://drive.google.com/open?id=1tN8O-0scfzAyGk9n-LJNGPXYWHQWv5tV
+
+Within this, there are several files. We manually downloaded the following to the subfolder data/:
+
+* *all_data_cels2016.csv* : Contains all data used as input for the analysis in the paper. This is UMI and poisson counting distribution (to account for highly expressed transcripts coming close to UMI saturation) corrected. No filtering or normalization.
+* *all_data_annotation_Cels2016.csv* : annotation per cell of the previous file (alpha, beta,delta,pp,epsilon, acinar,duct, endothelial, mesenchymal, unclear or bad quality cell)
+
+```{r}
+m<-as.matrix(read.table(fp(bp,"data/all_data_cels2016.csv")))
+cm<-read.table(fp(bp,"data/all_data_annotation_Cels2016.csv"))
+cc<-!(cm$x %in% c("unclear","bad_quality_cell"))
+m<-m[,cc]
+gg<-rowSums(m)>0
+m<-m[gg,]
+cm<-data.frame(celltype=as.character(cm$x[cc]))
+cm$nUMI<-colSums(m)
+sce<-SingleCellExperiment(assays=list(counts=m),colData=cm)
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+### Normalization and Feature Selection
+
+Scran size factors
+
+```{r}
+#sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+cl<-scran::quickCluster(sce)
+sce<-scran::computeSumFactors(sce,clusters=cl)
+sce<-scater::normalize(sce)
+```
+
+rank genes by HVG, deviance, and highly expressed
+
+```{r}
+gm<-rank_all_genes(sce)
+rowData(sce)<-gm
+#saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+## Obsolete
+
+### Download Phenodata
+
+```{r}
+gse <- GEOquery::getGEO("GSE85241")
+gse <- gse[[1]]
+pdata <- pData(gse)
+#each row is a sample (cell), each column is some phenotype attribute
+dir.create(fp(bp,"extdata"))
+write.table(pdata, file=fp(bp,"extdata/pData.txt"))
+```
+
+### Download Count Matrix
+
+```
+pushd real/muraro_2016
+mkdir -p data
+wget -P data ftp://ftp.ncbi.nlm.nih.gov/geo/series/GSE85nnn/GSE85241/suppl/GSE85241_cellsystems_dataset_4donors_updated.csv.gz
+gunzip data/GSE85241_cellsystems_dataset_4donors_updated.csv.gz
+```
+
+### Parse metadata and create sce object
+
+```{r}
+m<-read.table(fp(bp,"data/GSE85241_cellsystems_dataset_4donors_updated.csv"),header=TRUE)
+cm<-t(matrix(unlist(strsplit(colnames(m),".",fixed=TRUE)),nrow=2))
+cm2<-t(matrix(unlist(strsplit(cm[,2],"_",fixed=TRUE)),nrow=2))
+cm<-data.frame(donor=cm[,1],plate=cm2[,1])
+rownames(cm)<-colnames(m)
+cm$nUMI<-colSums(m)
+sce<-SingleCellExperiment(assays=list(counts=as.matrix(m)),colData=cm)
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```

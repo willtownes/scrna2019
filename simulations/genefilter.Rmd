@@ -1,0 +1,57 @@
+---
+title: "Gene Filtering Simulation"
+author: "Will Townes"
+output: html_document
+---
+
+```{r}
+library(tidyverse); theme_set(theme_bw())
+#suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./util/functions_genefilter.R")
+```
+
+We want to be sure feature selection by deviance is not just finding highly expressed genes. In particular, if there are genes with high but constant expression, we want to make sure they are not picked up by deviance filtering. We will create three types of genes:
+1. genes with low expression 
+2. genes with high but constant expression
+3. genes with high expression but variable expression (differentially expressed).
+
+We will make sure deviance finds only the third type of gene, whereas we expect highly expressed genes to find both types 2 and 3.
+
+```{r}
+set.seed(101)
+N<-500; J<-5000 #number of cells and genes
+sz<-rgamma(N,shape=10,rate=10)
+summary(sz)
+mu1<-.1; mu2<-5; mu3a<-1; mu3b<-9
+Y1<-replicate(J/2,rnbinom(N,size=.1,mu=mu1*sz))
+Y2<-replicate(J/4,rpois(N,mu2*sz))
+Y3a<-replicate(J/4,rnbinom(N/2,size=.1,mu=mu3a*sz[1:(N/2)]))
+Y3b<-replicate(J/4,rnbinom(N/2,size=.1,mu=mu3b*sz[((N/2)+1):N]))
+Y3<-rbind(Y3a,Y3b)
+Y<-t(cbind(Y1,Y2,Y3))
+summary(colSums(Y))
+summary(1-colMeans(Y>0))
+max(Y)
+gtype<-c(rep("low",J/2),rep(c("high_const","high_var"),each=J/4))
+rm<-rowMeans(Y)
+summary(rm)
+boxplot(rm~gtype) #ensure high_var and high_const have same row means
+gm<-data.frame(gtype=gtype)
+cm<-data.frame(celltype=rep(c("a","b"),each=N/2),nUMI=colSums(Y))
+sce<-SingleCellExperiment(assays=list(counts=Y),colData=cm,rowData=gm)
+rownames(sce)<-paste0("gene",1:J)
+colnames(sce)<-paste0("cell",1:N)
+cl<-scran::quickCluster(sce)
+table(cm$celltype,cl)
+sce<-scran::computeSumFactors(sce,clusters=cl)
+sce<-scater::normalize(sce)
+rk<-rank_all_genes(sce)
+cor(rk)
+```
+
+```{r}
+pd<-cbind(rk,genetype=gtype)
+pd2<-pd %>% gather(key="genefilter",value="rank",-genetype)
+ggplot(pd2,aes(x=genefilter,y=rank,fill=genetype))+geom_boxplot()+scale_y_reverse()+xlab("feature selection method")+ylab("informativeness rank")
+ggsave("./simulations/genefilter_sim_boxplot.pdf",width=6,height=4)
+```

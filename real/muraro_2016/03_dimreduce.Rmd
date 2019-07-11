@@ -1,0 +1,123 @@
+---
+title: "Muraro 2016 Cel-Seq2 Pancreas"
+author: "Will Townes"
+output: html_document
+---
+
+Dimension reductions
+
+```{r}
+library(tidyverse); theme_set(theme_bw())
+suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./real/util/functions_dimreduce.R") #loads glmpca, existing, and util/functions
+source("./util/clustering.R")
+fp<-file.path
+bp<-"./real/muraro_2016"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-TRUE #save plots?
+if(!dir.exists(fp(bp,"embeddings"))) dir.create(fp(bp,"embeddings"))
+```
+
+## Gene Filtering
+
+```{r}
+J<-2000
+sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+gm<-as.data.frame(rowData(sce))
+sce_d<-sce[gm$dev<=J,]
+sce_h<-sce[gm$hvg<=J,]
+Yd<-round(counts(sce_d))
+Yh<-round(counts(sce_h))
+```
+
+### Dimension Reductions
+
+```{r}
+L<-15
+res_h<-dimreduce_all(Yh,L)
+write.table(res_h$factors,fp(bp,"embeddings/hvg_G2000_L15.txt"),quote=FALSE,row.names=FALSE)
+
+res_d<-dimreduce_all(Yd,L)
+write.table(res_d$factors,fp(bp,"embeddings/dev_G2000_L15.txt"),quote=FALSE,row.names=FALSE)
+
+
+tt<-format_elapsed(res_d$elapsed,res_h$elapsed)
+write.table(tt,fp(bp,"results/elapsed_G2000_L15.txt"),quote=FALSE,row.names=FALSE)
+```
+
+### Make plots of dimension reductions
+
+Load the embeddings and organize for plotting
+
+```{r}
+sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+cm<-as.data.frame(colData(sce))
+cm<-data.frame(cell_id=rownames(cm),celltype=cm$celltype)
+res_d<-read.table(fp(bp,"embeddings/dev_G2000_L15.txt"),header=TRUE)
+res_h<-read.table(fp(bp,"embeddings/hvg_G2000_L15.txt"),header=TRUE)
+res_d$genefilter<-"dev"
+res_h$genefilter<-"hvg"
+theirs<-c("pca_log","zinbwave")
+pd<-rbind(subset(res_d,!(dimreduce %in% theirs)),subset(res_h,dimreduce %in% theirs))
+pd<-merge(pd,cm)
+#sanity check plot
+ggplot(pd,aes(x=dim1,y=dim2,colour=celltype))+geom_point()+facet_wrap(~dimreduce,scales="free")
+```
+
+Visualize with UMAP
+
+```{r}
+L<-15
+uf<-function(dr,...){
+  d<-subset(pd,dimreduce==dr)
+  cn<-paste0("dim",1:L)
+  factors<-umap(t(d[,cn]),...)
+  cbind(factors,d[,!(colnames(d) %in% cn)])
+}
+pd2<-do.call(rbind,lapply(unique(pd$dimreduce),uf,min_dist=1))
+ggplot(pd2,aes(x=dim1,y=dim2,colour=celltype)) +geom_point(size=.5) +facet_wrap(~dimreduce,scales="free") +guides(colour=guide_legend(override.aes=list(size=2)))
+if(sp){ ggsave(fp(pth,"muraro_umap.pdf"),width=7,height=4) }
+```
+
+### Clustering performance
+
+Use Seurat clustering
+
+```{r}
+L<-15
+cn<-paste0("dim",1:L)
+dd<-merge(rbind(res_d,res_h),cm)
+f<-function(d,res=0.8){
+  factors<-as.data.frame(d[,cn])
+  rownames(factors)<-d$cell_id
+  cl<-seurat_cluster(factors,res=res)$cluster
+  data.frame(ari=ari(cl,d$celltype), sil=silfunc(cl,dist(factors)))
+}
+res<-dd %>% group_by(dimreduce,genefilter) %>% group_modify(~f(.x))
+(res<-as.data.frame(res))
+write.table(res,fp(bp,"results/muraro_clusteval.txt"),row.names=FALSE,quote=FALSE)
+```
+
+plot clustering results
+
+```{r}
+#res<-read.table(fp(bp,"results/muraro_clusteval.txt"),header=TRUE)
+ggplot(res,aes(x=dimreduce,y=ari,color=genefilter))+geom_point()
+theirs<-c("pca_log","zinbwave")
+keep1<-(res$dimreduce %in% theirs & res$genefilter=="hvg")
+keep2<-(!(res$dimreduce %in% theirs) & res$genefilter=="dev")
+res2<-res[keep1 | keep2,]
+(res2<-res2[order(res2$ari,decreasing=TRUE),])
+res2$ari<-round(res2$ari,3)
+res2$sil<-round(res2$sil,3)
+write.table(res2,fp(bp,"results/muraro_clusteval2.txt"),row.names=FALSE,quote=FALSE)
+```
+
+# Session information
+
+```{r}
+sessionInfo()
+```

@@ -1,0 +1,4 @@
+data/*
+bsub_out/*
+bsub_out_alias/*
+qc_fastq/*

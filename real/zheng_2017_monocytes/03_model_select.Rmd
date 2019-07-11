@@ -1,0 +1,92 @@
+---
+title: "Zheng monocytes Model Selection"
+author: "Will Townes"
+output: html_document
+---
+
+Zheng 2017 Monocytes (10x)
+
+```{r}
+library(ggplot2); theme_set(theme_bw())
+suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./util/functions.R")
+
+fp<-file.path
+bp<-"./real/zheng_2017_monocytes"
+pth<-fp(bp,"results/fig")
+if(!dir.exists(pth)){
+  dir.create(pth,recursive=TRUE)
+}
+sp<-TRUE #save plots?
+ggs<-function(plt,w=6,h=4,...){
+  if(sp){ ggsave(file=fp(pth,plt),width=w,height=h,...) }
+}
+```
+
+Load UMI counts matrix and read counts matrix
+
+```{r}
+sce0<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+set.seed(205) #reproducibility
+ssc<-sample.int(ncol(sce0),size=500) #subset random cells
+ssg<-sample.int(nrow(sce0),size=2000) #subset random genes
+sce<-sce0[ssg,ssc]
+m<-as.matrix(assay(sce,"counts"))
+sz<-colSums(m)
+z<-log10(sz)
+pz<-colMeans(m==0)
+rc<-as.matrix(assay(sce,"read_counts"))
+rowmins<-apply(m,1,min)
+rowsd<-apply(m,1,sd)
+gg<-rowmins==0 & rowsd>1e-12
+m2<-m[gg,]
+rc2<-rc[gg,]
+print(dim(m2))
+```
+
+### Compare model fit for different likelihoods
+
+Likelihoods:
+* multinomial
+* Poisson
+* Dirichlet-multinomial
+* negative binomial
+* normal
+* zero inflated Poisson
+* zero inflated lognormal
+
+All likelihoods include column means as offset. Have to remove genes with no zero values in order to include zero inflated models in comparisons.
+
+```{r}
+system.time(res<-bic_all(m2))
+barplot(sort(res),xlab="likelihood",ylab="BIC",main="UMI counts",log="y")
+res_rc<-bic_all(rc2)
+barplot(sort(res_rc),xlab="likelihood",ylab="BIC",main="read counts")
+dd<-as.data.frame(res)
+colnames(dd)<-"BIC"
+dd$dat<-"umi_counts"
+dd$lik<-rownames(dd)
+dd2<-as.data.frame(res_rc)
+colnames(dd2)<-"BIC"
+dd2$dat<-"read_counts"
+dd2$lik<-rownames(dd2)
+dd<-rbind(dd,dd2)
+rownames(dd)<-NULL
+dd<-dd[,c(2,3,1)]
+write.table(dd,fp(bp,"results/gof_bic.txt"),quote=FALSE,row.names=FALSE)
+```
+
+The best performing likelihood is Dirichlet-multinomial for UMI counts followed by multinomial then Poisson.
+
+```{r}
+pd<-read.table(fp(bp,"results/gof_bic.txt"),header=TRUE)
+levels(pd$lik)[levels(pd$lik)=="normal"]<-"nml"
+plt_func<-function(d){
+  d$lik<-factor(d$lik,levels=d$lik[order(d$BIC)])
+  ggplot(d,aes(x=lik,y=BIC))+geom_point(size=3)+xlab("likelihood")
+}
+plt_func(subset(pd,dat=="umi_counts" & lik!="nml"))
+ggs("gof_bic_zheng_monocytes_umi.pdf",w=3,h=2)
+plt_func(subset(pd,dat=="read_counts"))
+ggs("gof_bic_zheng_monocytes_reads.pdf",w=3,h=2)
+```

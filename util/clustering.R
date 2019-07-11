@@ -1,6 +1,18 @@
 #clustering utility functions
 library(Seurat)
-library(mclust)
+suppressPackageStartupMessages(library(mclust))
+
+ari<-mclust::adjustedRandIndex
+
+silfunc<-function(clust,DM){
+  #compute silhouette coefficient of a clustering
+  #case where only one cluster, set silhouette to zero
+  #clust=indicator vector of cluster labels
+  #DM=distance object computed from some embedding (eg, DM<-dist(embed))
+  if(length(unique(clust))==1){ return(0) }
+  sil<-cluster::silhouette(as.numeric(clust),DM)
+  tryCatch(mean(sil[,3]),error=function(e){NA})
+}
 
 seurat_cluster_inner<-function(seu,dims,res){
   seu<-FindNeighbors(seu,dims=1:dims,verbose=FALSE)

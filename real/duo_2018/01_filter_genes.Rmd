@@ -1,11 +1,13 @@
 ---
 title: "Duo et al 2018"
+author: "Will Townes"
 output: html_document
 ---
 
 ```{r}
+library(tidyverse); theme_set(theme_bw())
+library(ggridges)
 library(DuoClustering2018)
-library(eulerr)
 source("./util/functions_genefilter.R")
 
 fp<-file.path
@@ -14,7 +16,7 @@ pth<-fp(bp,"results/fig")
 if(!dir.exists(pth)){
   dir.create(pth,recursive=TRUE)
 }
-sp<-FALSE #save plots?
+sp<-TRUE #save plots?
 if(!dir.exists(fp(bp,"data"))) dir.create(fp(bp,"data"))
 ```
 
@@ -41,22 +43,61 @@ rk$gene<-NULL
 write.table(rk,file=fp(bp,"data","genefilter_ranks_8eq.txt"),quote=FALSE)
 ```
 
+same thing for the 4eq dataset
+
+```{r}
+sce<-sce_full_Zhengmix4eq()
+res<-list()
+res$expr<-filterExpr(sce)
+res$hvg<-filterHVG(sce,total_umi="total_counts")
+res$devb<-filterDev(sce,dev="binomial")
+res$devp<-filterDev(sce,dev="poisson")
+f<-function(sn){
+  s<-res[[sn]]
+  x<-data.frame(gene=rownames(s),rank=seq_len(nrow(s)))
+  colnames(x)[2]<-sn
+  x
+}
+res2<-lapply(names(res),f)
+rk<-Reduce(function(x,y){merge(x,y,by="gene",all=TRUE)},res2)
+rownames(rk)<-rk$gene
+rk$gene<-NULL
+#rk is data frame with all genes and their informative ranks based on 5 criteria
+write.table(rk,file=fp(bp,"data","genefilter_ranks_4eq.txt"),quote=FALSE)
+```
+
+### Mean/variance plot
+
 ```{r}
 #sce<-sce_full_Zhengmix8eq()
 #rk<-read.table(fp(bp,"data","genefilter_ranks_8eq.txt"))
 rk<-rk[rownames(sce),]
-Y<-normcounts(sce)
-pd<-data.frame(m=rowMeans(Y),v=apply(Y,1,var))
-pd$vmr=pd$v/pd$m
-pd<-cbind(pd,rk)
-pd<-subset(pd,vmr>0)
-pd$criteria<-"neither (13,886)"
-pd$criteria[pd$devb<=1000 & pd$hvg<=1000]<-"both (171)"
-pd$criteria[pd$devb<=1000 & pd$hvg>1000]<-"high deviance (829)"
-pd$criteria[pd$devb>1000 & pd$hvg<=1000]<-"highly variable (829)"
-ggplot(pd,aes(x=m,y=vmr,colour=criteria))+geom_point()+scale_x_log10() +xlab("average normalized expression") +ylab("variance to mean ratio") +theme(legend.position=c(0,.7))
+rk$dev<-rk$devb
+rowData(sce)<-cbind(rowData(sce),rk)
+pd<-meanvar_plotdata(sce,G=1000)
+ggplot(pd,aes(x=m,y=vmr,colour=criteria))+geom_point(alpha=.9)+xlab("average normalized expression") +ylab("variance to mean ratio") +theme(legend.position=c(0.2,.8))+scale_color_manual(values=c("orange","red","blue","gray"))+scale_x_log10()+scale_y_log10()
 #+scale_size_manual(values=c(1,1,1,.5))+scale_y_log10() #size=criteria, legend.position=c(.5,.2)
 ggsave(file=fp(pth,"zheng8eq_mean_var.pdf"),width=6,height=4)
+```
+
+### Top deviance genes
+
+Find genes that are highly expressed and high deviance but not highly variable. Examine whether the expression pattern is high constant expression or whether it has outliers.
+
+```{r}
+#sce<-sce_full_Zhengmix8eq()
+#rk<-read.table(fp(bp,"data","genefilter_ranks_8eq.txt"))
+m<-counts(sce)
+ra<-t(t(m)/colSums(m)) #relative abundance
+rk<-rk[rownames(sce),]
+rk2<-subset(rk,hvg>2000)
+rk2<-rk2[order(rk2$devb),]
+gg<-head(rownames(rk2),5)
+#all five in top 100 by expression, top 150 by deviance, >2000 by HVG
+pd<-as.data.frame(t(ra[gg,]))
+pd2<-pd %>% gather(key="gene",value="expr")
+ggplot(pd2, aes(expr,gene,fill=gene))+geom_density_ridges(stat="binline",bins=50,scale=0.95,draw_baseline=FALSE)+theme(legend.position="none")+xlab("relative abundance")
+if(sp){ ggsave(fp(pth,"zheng8eq_topdeviance_ggridge.pdf"),width=6,height=4) }
 ```
 
 ```{r}
@@ -69,15 +110,27 @@ rk2<- rk<=G
 crossprod(rk2) / G
 rk2<-as.data.frame(rk2)
 with(rk2,table(devb,devp)) #devp,devb perfect overlap on top 1500 genes
-gg<-subset(rk2[,-4],expr | hvg | devb )
-colnames(gg)<-c("Expr","HVG","Dev")
-eul<-euler(gg)
-#pdf(file=fp(pth,"genefilter_overlap_zhengmix8eq.pdf"),width=6,height=4)
-plot(eul,quantities=TRUE,fill="transparent")
-#dev.off()
 ```
 
 As shown above, the Poisson and Binomial deviance criteria rank genes almost, but not exactly, identically. The highly expressed genes agree with the deviance methods (Spearman's Rank Correlation 0.9987), while the highly variable genes disagree with all other methods (Spearman's Rank Correlations ranging from .3738-.3835). Focusing on the top 1500 genes, we find that the two deviance methods select the exact same set of genes as "highly informative". There is very strong overlap with the highly expressed genes as well, while neither the highly expressed nor highly deviant genes overlap much with the highly variable genes.
+
+```{r}
+#plot made in response to Joshua Batson twitter comment, see also
+#http://ds.czbiohub.org/blog/The-Effect-of-PCR-on-scRNAseq/
+
+#sce<-sce_full_Zhengmix8eq()
+#rk<-read.table(fp(bp,"data","genefilter_ranks_8eq.txt"))
+rk<-rk[rownames(sce),]
+#res$devb<-filterDev(sce,dev="binomial")
+m<-counts(sce)
+pd2<-data.frame(rel_abundance=rowSums(m)/sum(m),devb=rk$devb)
+G<-1000
+pd2$topdeviance<-pd2$devb<=G
+pd2$pct_cells_nz<-rowMeans(m>0)
+pd2<-subset(pd2,pct_cells_nz>0 & rel_abundance>0)
+pd2<-pd2[order(pd2$topdeviance,decreasing=TRUE),]
+ggplot(pd2,aes(x=rel_abundance,y=pct_cells_nz,colour=topdeviance,size=topdeviance))+geom_point(alpha=.5)+scale_x_log10()+scale_y_log10()+theme_bw()+scale_colour_manual(values=c("black","red"))+scale_size_manual(values=c(1,2))#+scale_alpha_manual(values=c(.5,1))
+```
 
 # Session information
 
