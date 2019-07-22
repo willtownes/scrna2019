@@ -1,6 +1,6 @@
 # Feature Selection and Dimension Reduction for Single Cell RNA-Seq based on a Multinomial Model
 
-This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. We are working on turning GLM-PCA and its fast approximations into a standalone R package. When it is available we will post a link here.
+This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. GLM-PCA is available as a [standalone R package](https://github.com/willtownes/glmpca).
 
 ### Coauthors
 
