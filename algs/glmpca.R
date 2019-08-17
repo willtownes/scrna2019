@@ -229,6 +229,7 @@ glmpca<-function(Y,L,fam=c("poi","nb","mult","bern"),ctl=list(maxIter=1000,eps=1
   #regression coefficients are A,G, latent factors are U and loadings V.
   #For negative binomial, convergence only works if starting with nb_theta large
   
+  Y<-as.matrix(Y)
   fam<-match.arg(fam)
   N<-ncol(Y); J<-nrow(Y)
   #sanity check inputs
@@ -262,7 +263,7 @@ glmpca<-function(Y,L,fam=c("poi","nb","mult","bern"),ctl=list(maxIter=1000,eps=1
   #initialize U,V, with row-specific intercept terms
   U<-cbind(1, X, matrix(rnorm(N*Ku)*1e-5/Ku,nrow=N))
   if(!is.null(init$factors)){
-    #print("initialize factors")
+    #message("initialize factors")
     L0<-min(L,ncol(init$factors))
     U[,(Ko+Kf)+(1:L0)]<-init$factors[,1:L0,drop=FALSE]
   }
@@ -270,7 +271,7 @@ glmpca<-function(Y,L,fam=c("poi","nb","mult","bern"),ctl=list(maxIter=1000,eps=1
   V<-cbind(a1, matrix(rnorm(J*(Ko-1))*1e-5/Kv,nrow=J))
   V<-cbind(V, Z, matrix(rnorm(J*L)*1e-5/Kv,nrow=J))
   if(!is.null(init$loadings)){
-    #print("initialize loadings")
+    #message("initialize loadings")
     L0<-min(L,ncol(init$loadings))
     V[,(Ko+Kf)+(1:L0)]<-init$loadings[,1:L0,drop=FALSE]
   }
@@ -280,47 +281,52 @@ glmpca<-function(Y,L,fam=c("poi","nb","mult","bern"),ctl=list(maxIter=1000,eps=1
   for(t in 1:ctl$maxIter){
     #rmse[t]<-sd(Y-ilfunc(rfunc(U,V)))
     dev[t]<-gf$dev_func(Y,rfunc(U,V))
-    if(t>5 && abs(dev[t]-dev[t-1])/(0.1+abs(dev[t-1]))<ctl$eps){
-      break
+    if(t>5){
+      if(!is.finite(dev[t])){
+        stop("Numerical divergence (deviance no longer finite), try increasing the penalty to improve stability of optimization.")
+      }
+      if(abs(dev[t]-dev[t-1])/(0.1+abs(dev[t-1]))<ctl$eps){
+        break
+      }
+      if(verbose){ 
+        dev_format<-format(dev[t],scientific=TRUE,digits=4)
+        msg<-paste0("Iteration: ",t," | deviance=",dev_format)
+        if(fam=="nb"){ msg<-paste0(msg," | nb_theta: ",signif(nb_theta,3)) }
+        message(msg) 
+      }
+      #(k %in% lid) ensures no penalty on regression coefficients: 
+      for(k in vid){
+        ig<- gf$infograd(Y,rfunc(U,V))
+        grads<- (ig$grad)%*%U[,k] - penalty*V[,k]*(k %in% lid) 
+        infos<- (ig$info) %*% U[,k]^2 + penalty*(k %in% lid)
+        V[,k]<-V[,k]+grads/infos
+      }
+      for(k in uid){
+        ig<- gf$infograd(Y,rfunc(U,V))
+        grads<- crossprod(ig$grad, V[,k]) - penalty*U[,k]*(k %in% lid) 
+        infos<- crossprod(ig$info, V[,k]^2) + penalty*(k %in% lid) 
+        U[,k]<-U[,k]+grads/infos
+      }
+      if(fam=="nb"){
+        nb_theta<-est_nb_theta(Y,gf$linkinv(rfunc(U,V)),nb_theta)
+        gf<-glmpca_family(fam,nb_theta)
+      }
     }
-    if(verbose){ 
-      dev_format<-format(dev[t],scientific=TRUE,digits=4)
-      msg<-paste0("Iteration: ",t," | deviance=",dev_format)
-      if(fam=="nb"){ msg<-paste0(msg," | nb_theta: ",signif(nb_theta,3)) }
-      print(msg) 
+    #postprocessing: include row and column labels for regression coefficients
+    if(is.null(Z)){
+      G<-NULL
+    } else {
+      G<-U[,Ko+(1:Kf),drop=FALSE]
+      rownames(G)<-colnames(Y); colnames(G)<-colnames(Z)
     }
-    #(k %in% lid) ensures no penalty on regression coefficients: 
-    for(k in vid){
-      ig<- gf$infograd(Y,rfunc(U,V))
-      grads<- (ig$grad)%*%U[,k] - penalty*V[,k]*(k %in% lid) 
-      infos<- (ig$info) %*% U[,k]^2 + penalty*(k %in% lid)
-      V[,k]<-V[,k]+grads/infos
-    }
-    for(k in uid){
-      ig<- gf$infograd(Y,rfunc(U,V))
-      grads<- crossprod(ig$grad, V[,k]) - penalty*U[,k]*(k %in% lid) 
-      infos<- crossprod(ig$info, V[,k]^2) + penalty*(k %in% lid) 
-      U[,k]<-U[,k]+grads/infos
-    }
-    if(fam=="nb"){
-      nb_theta<-est_nb_theta(Y,gf$linkinv(rfunc(U,V)),nb_theta)
-      gf<-glmpca_family(fam,nb_theta)
-    }
+    X<-if(is.null(X)){ matrix(1,nrow=N) } else { cbind(1,X) }
+    if(!is.null(colnames(X))){ colnames(X)[1]<-"(Intercept)" }
+    A<-V[,1:Ko,drop=FALSE]
+    rownames(A)<-rownames(Y); colnames(A)<-colnames(X)
+    res<-ortho(U[,lid],V[,lid],A,X=X,G=G,Z=Z,ret="df")
+    rownames(res$factors)<-colnames(Y)
+    rownames(res$loadings)<-rownames(Y)
+    res$dev=dev[1:t]; res$family<-gf
+    res
   }
-  #postprocessing: include row and column labels for regression coefficients
-  if(is.null(Z)){
-    G<-NULL
-  } else {
-    G<-U[,Ko+(1:Kf),drop=FALSE]
-    rownames(G)<-colnames(Y); colnames(G)<-colnames(Z)
-  }
-  X<-if(is.null(X)){ matrix(1,nrow=N) } else { cbind(1,X) }
-  if(!is.null(colnames(X))){ colnames(X)[1]<-"(Intercept)" }
-  A<-V[,1:Ko,drop=FALSE]
-  rownames(A)<-rownames(Y); colnames(A)<-colnames(X)
-  res<-ortho(U[,lid],V[,lid],A,X=X,G=G,Z=Z,ret="df")
-  rownames(res$factors)<-colnames(Y)
-  rownames(res$loadings)<-rownames(Y)
-  res$dev=dev[1:t]; res$family<-gf
-  res
-}
+  
