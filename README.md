@@ -1,8 +1,10 @@
 # Feature Selection and Dimension Reduction for Single Cell RNA-Seq based on a Multinomial Model
 
-This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. GLM-PCA is available as a [standalone R package](https://github.com/willtownes/glmpca).
+This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. 
 
-### Coauthors
+GLM-PCA (dimension reduction for generalized linear model likelihoods) is now available as a [standalone R package](https://github.com/willtownes/glmpca). This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
+
+### Authors
 
 Will Townes, Stephanie Hicks, Martin Aryee, and Rafa Irizarry
 
@@ -12,7 +14,7 @@ Will Townes, Stephanie Hicks, Martin Aryee, and Rafa Irizarry
 
 Implementations of dimension reduction algorithms 
 * *existing.R* - wrapper functions for PCA, tSNE, ZINB-WAVE, etc
-* *glmpca.R* - implementation of PCA for generalized linear model likelihoods. This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
+* *glmpca.R* - placeholder file that just loads the [glmpca package](https://github.com/willtownes/glmpca).
 
 ### real
 
