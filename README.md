@@ -1,5 +1,7 @@
 # Feature Selection and Dimension Reduction for Single Cell RNA-Seq based on a Multinomial Model
 
+[![DOI](https://zenodo.org/badge/174751869.svg)](https://zenodo.org/badge/latestdoi/174751869)
+
 This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. 
 
 GLM-PCA (dimension reduction for generalized linear model likelihoods) is now available as a [standalone R package](https://github.com/willtownes/glmpca). This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
@@ -33,4 +35,3 @@ Utility functions.
 * *clustering.R* - wrappers for seurat clustering, model based clustering, and k-means
 * *functions.R* - Poisson and Binomial deviance and residuals functions, a function for loading 10x read counts from molecule information files.
 * *functions_genefilter.R* - convenience functions for gene filtering (feature selection) based on highly variable genes, highly expressed genes, and deviance.
-
