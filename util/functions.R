@@ -43,6 +43,25 @@ get_10x_readcounts<-function(counts_folder,mol_info_h5){
   sce
 }
 
+##### ID conversion functions #####
+
+ensembl2symbol<-function(genes,sp=c("hsapiens","mmusculus")){
+  #genes is a character vector of ensembl IDs
+  #sp=the species
+  #returns a data frame with the ensembl ID mapped to symbols
+  #if the gene didn't have a corresponding symbol, it is removed from the data frame.
+  sp<-match.arg(sp)
+  symb<-list(hsapiens="hgnc",mmusculus="mgi")
+  bm<-biomaRt::useMart("ensembl")
+  mart<-biomaRt::useDataset(paste0(sp,"_gene_ensembl"),bm)
+  bml<-biomaRt::getBM(filters="ensembl_gene_id",attributes=c("ensembl_gene_id",paste0(symb[[sp]],"_symbol")),values=genes,mart=mart)
+  #make sure order matches the input genes order
+  #if no matching symbol was found, use NA
+  genes<-as.data.frame(genes,stringsAsFactors=FALSE)
+  colnames(genes)<-"ensembl_gene_id"
+  plyr::join(genes,bml,by="ensembl_gene_id",type="left",match="first")
+}
+
 ##### Downsampling functions #####
 
 Down_Sample_Matrix<-function(expr_mat,min_lib_size=NULL){
@@ -237,58 +256,107 @@ dmn_bic<-function(m){
   -2*ll+nrow(m)*log(prod(dim(m)))
 }
 
-poi_bic<-function(m){
+poi_fit<-function(m,X=NULL,sz=NULL,maxit=100){
   #poisson
-  sz<-colMeans(m)
-  lam<-rowSums(m)/sum(sz)
-  mu<-outer(lam,sz)
-  ll<-sum(dpois(m,mu,log=TRUE))
-  df<-length(lam)
+  if(is.null(sz)){ sz<-log(colMeans(m)) }
+  if(is.null(X)){ #no covariates => closed form solution
+    sz<-exp(sz)
+    lam<-rowSums(m)/sum(sz)
+    mu<-outer(lam,sz)
+    ll<-matrix(dpois(m,mu,log=TRUE),nrow=nrow(m))
+    return(data.frame(ll=rowSums(ll),converged=TRUE))
+  } else { #covariates included
+    stopifnot(all(X[,1]==1))
+    k<-ncol(X)
+    fam<-poisson()
+    #default maxit is 25 for glm.fit, but some fits take longer to converge
+    ctl<-list(maxit=maxit) 
+    f<-function(y){
+      fit<-glm.fit(X,y,offset=sz,control=ctl,family=fam)
+      c(ll=k-fit$aic/2, converged=fit$converged)
+    }
+    res<-as.data.frame(t(apply(m,1,f)))
+    res$converged<-as.logical(res$converged)
+    return(res)
+  }
+}
+
+poi_bic<-function(m,X=NULL,prefit=NULL,maxit=100){
+  #poisson. prefit should be a data frame with column "ll" for log-likelihood
+  k<-if(is.null(X)){ 1 } else { ncol(X) }
+  df<-k*nrow(m)
+  if(is.null(prefit)){
+    prefit<-poi_fit(m,X,maxit=maxit)
+  }
+  ll<-sum(prefit$ll)
+  #compute BIC: -2*loglik+df*log(n_obs)
   -2*ll+df*log(prod(dim(m)))
 }
 
-nb_fit<-function(m){
+nb_fit<-function(m,X=NULL,sz=NULL){
   #neg binom
-  sz<-colMeans(m)
-  offsets<-log(sz)
-  f<-function(x){
-    fit<-MASS::glm.nb(x~offset(offsets))
-    c(theta=fit$theta,ll=logLik(fit))
+  if(is.null(sz)){ sz<-log(colMeans(m)) }
+  if(is.null(X)){
+    f<-function(y){
+      mgcv::gam(y~1,family=mgcv::nb,offset=sz,method="ML")
+    }
+  } else {
+    f<-function(y){
+      mgcv::gam(y~X-1,family=mgcv::nb,offset=sz,method="ML")
+    }
   }
-  as.data.frame(t(apply(m,1,f)))
+  g<-function(y){
+    fit<-f(y)
+    th<-fit$family$getTheta(TRUE) #FALSE (default) gives log(theta)
+    ll<-as.numeric(logLik(fit))
+    c(theta=th,ll=ll,converged=fit$converged)
+  }
+  res<-as.data.frame(t(apply(m,1,g)))
+  res$converged<-as.logical(res$converged)
+  res
 }
 
-nb_bic<-function(m,prefit=NULL){
+nb_bic<-function(m,X=NULL,prefit=NULL){
   if(is.null(prefit)){ 
-    prefit<-nb_fit(m) 
+    prefit<-nb_fit(m,X)
   } else {
     stopifnot(nrow(m)==nrow(prefit))
   }
   ll<-sum(prefit$ll)
-  df<-2*nrow(m)
-  -2*ll+df*log(prod(dim(m)))
+  k<-if(is.null(X)){ 2 } else { ncol(X)+1 }
+  -2*ll+(k*nrow(m))*log(prod(dim(m)))
 }
 
-zip_fit<-function(m){
+zip_fit<-function(m,X=NULL,sz=NULL){
   #zero inflated poisson
-  sz<-colMeans(m)
-  offsets<-log(sz)
-  f<-function(x){
-    fit<-pscl::zeroinfl(x~offset(offsets) | 1,dist="poisson")
-    c(pz=plogis(coef(fit)[2]),ll=logLik(fit))
+  if(is.null(sz)){ sz<-log(colMeans(m)) }
+  if(is.null(X)){
+    f<-function(y){
+      pscl::zeroinfl(y~offset(sz) | 1,dist="poisson")
+    }
+  } else {
+    f<-function(y){
+      pscl::zeroinfl(y~offset(sz)+X-1 | 1,dist="poisson")
+    }
   }
-  as.data.frame(t(apply(m,1,f)))
+  g<-function(y){
+    fit<-f(y)
+    c(pz=plogis(coef(fit)[2]),ll=logLik(fit),converged=fit$converged)
+  }
+  res<-as.data.frame(t(apply(m,1,g)))
+  res$converged<-as.logical(res$converged)
+  res
 }
 
-zip_bic<-function(m,prefit=NULL){
+zip_bic<-function(m,X=NULL,prefit=NULL){
   if(is.null(prefit)){ 
-    prefit<-zip_fit(m) 
+    prefit<-zip_fit(m,X) 
   } else {
     stopifnot(nrow(m)==nrow(prefit))
   }
   ll<-sum(prefit$ll)
-  df<-2*nrow(m)
-  -2*ll+df*log(prod(dim(m)))
+  k<-if(is.null(X)){ 2 } else { ncol(X)+1 }
+  -2*ll+(k*nrow(m))*log(prod(dim(m)))
 }
 
 normal_bic<-function(m){
@@ -303,25 +371,45 @@ normal_bic<-function(m){
   -2*ll+df*log(prod(dim(m)))
 }
 
-ziln_bic<-function(m){
+lnorm_nz_fit<-function(m,X=NULL){
+  sz<-colMeans(m)
+  lra<-t(t(log(m))-log(sz))
+  lra[is.infinite(lra)]<-NA
+  if(is.null(X)){
+    mu<-rowMeans(lra,na.rm=TRUE)
+    r<-lra-mu #matrix with NAs
+    s<-apply(r,1,sd,na.rm=TRUE)
+    z<-r/s #matrix with NAs
+    return(sum(dnorm(z[!is.na(z)],mean=0,sd=1,log=TRUE)))
+  } else {
+    f<-function(y){
+      r<-residuals(lm(y~X-1,na.action="na.omit"))
+      z<-r/sd(r)
+      sum(dnorm(z,mean=0,sd=1,log=TRUE),na.rm=TRUE)
+    }
+    return(sum(apply(lra,1,f)))
+  }
+}
+
+ziln_bic<-function(m,X=NULL){
   #zero inflated log-normal (hurdle model)
   Z<-m>0
   p<-rowMeans(Z)
   ll1<-sum(dbinom(Z,1,p,log=TRUE))
-  sz<-colMeans(m)
-  lra<-t(t(log(m))-log(sz))
-  lra[is.infinite(lra)]<-NA
-  mu<-rowMeans(lra,na.rm=TRUE)
-  r<-lra-mu
-  s<-apply(r,1,sd,na.rm=TRUE)
-  z<-r/s
-  ll2<-sum(dnorm(z[!is.na(z)],mean=0,sd=1,log=TRUE))
-  df<-3*nrow(m)
+  ll2<-lnorm_nz_fit(m,X)
+  #per gene df is 1 for pzero, 1 for sd, 1 for mean+number of covars
+  if(is.null(X) || is.null(ncol(X))){ #X is a vector or NULL
+    k<-3
+  } else { #X is a matrix
+    k<-2+ncol(X)
+  }
   N<-prod(dim(m))
-  -2*(ll1+ll2)+df*log(N+sum(Z))
+  -2*(ll1+ll2)+(k*nrow(m))*log(N+sum(Z))
 }
 
-bic_all<-function(m,liks=c("mult","dmn","poi","nb","zip","normal","ziln")){
-  f<-function(x){eval(call(paste0(x,"_bic"),m))}
+bic_all<-function(m,X=NULL,liks=c("mult","dmn","poi","nb","zip","normal","ziln")){
+  covar_liks<-c("poi","nb","zip","ziln")
+  if(!is.null(X)){ liks<-intersect(liks,covar_liks) }
+  f<-function(x){eval(call(paste0(x,"_bic"),m,X))}
   sapply(liks,f)
 }

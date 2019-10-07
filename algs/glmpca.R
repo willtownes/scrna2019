@@ -1,2 +1,2 @@
-#devtools::install_github("willtownes/glmpca")
+#install.packages("glmpca")
 library(glmpca)

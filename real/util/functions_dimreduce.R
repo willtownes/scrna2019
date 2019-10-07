@@ -1,5 +1,6 @@
+#install.packages("glmpca")
+library(glmpca)
 source("./util/functions.R")
-source("./algs/glmpca.R")
 source("./algs/existing.R")
 
 logcpm<-function(Y){

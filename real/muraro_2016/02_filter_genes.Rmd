@@ -35,6 +35,8 @@ ggsave(file=fp(pth,"muraro_mean_var.pdf"),width=6,height=4)
 rk<-pd[,c("dev","expr","hvg")]
 #spearman rank correlations of the criteria
 cor(rk,method="spearman") #poisson, binomial deviance almost identical
+rk2<-as.data.frame(rk<=1000)
+table(rk2[,c(1,3,2)])
 ```
 
 ```{r}

@@ -8,14 +8,12 @@ output: html_document
 plate based UMI data from 3 individuals each with 3 replicates (plates).
 
 ```{r}
+library(glmpca)
 suppressPackageStartupMessages(library(SingleCellExperiment))
-#library(cowplot)
 library(ggplot2); theme_set(theme_bw())
-#library(Matrix)
 source("./util/functions.R")
 source("./algs/existing.R")
 source("./util/clustering.R")
-source("./algs/glmpca.R")
 fp<-file.path
 bp<-"./real/tung_2016"
 pth<-fp(bp,"results/fig")

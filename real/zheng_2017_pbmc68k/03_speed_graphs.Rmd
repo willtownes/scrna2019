@@ -29,7 +29,3 @@ Figure out power law exponent
 f<-function(el,N){coef(lm(log(el)~log(N)))[2]}
 pd %>% group_by(method) %>% summarize(power_law_slope=f(elapsed,N))
 ```
-
-```{r}
-sessionInfo()
-```

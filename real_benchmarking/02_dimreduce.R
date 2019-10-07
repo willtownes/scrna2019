@@ -1,9 +1,9 @@
 # time Rscript ./real_benchmarking/02_dimreduce.R
 # compute cell embeddings
+library(glmpca)
 library(SingleCellExperiment)
 source("./util/functions.R") #null_residuals function
 source("./algs/existing.R") #pca and zinbwave functions
-source("./algs/glmpca.R")
 
 fp<-file.path
 mkdir<-function(d){

@@ -15,8 +15,37 @@ mkdir -p data
 wget http://cf.10xgenomics.com/samples/cell-exp/1.1.0/fresh_68k_pbmc_donor_a/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz -P data
 tar -xzf data/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz -C data --strip-components=1
 rm data/fresh_68k_pbmc_donor_a_filtered_gene_bc_matrices.tar.gz
+```
+
+Obtain per-molecule information file to get read counts
+
+```
+wget http://cf.10xgenomics.com/samples/cell-exp/1.1.0/fresh_68k_pbmc_donor_a/fresh_68k_pbmc_donor_a_molecule_info.h5 -P data
 popd
 ```
+
+Merge UMI counts and read counts into single sce object
+
+```{r}
+suppressPackageStartupMessages(library(SingleCellExperiment))
+source("./util/functions.R") #get_10x_readcounts function
+fp<-file.path
+bp<-"./real/zheng_2017_pbmc68k"
+
+sce<-get_10x_readcounts(fp(bp,"data/hg19"),fp(bp,"data/fresh_68k_pbmc_donor_a_molecule_info.h5"))
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+
+# Compute SCRAN size factors
+#sce<-readRDS(fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+sce<-scran::computeSumFactors(sce)
+sce<-scater::normalize(sce)
+#logcounts assay created, is log2(1+counts/scran size factor)
+saveRDS(sce,fp(bp,"data/01_sce_all_genes_all_cells.rds"))
+```
+
+Can optionally delete the downloaded 10x files at this point to save disk space.
+
+
 
 Compute deviance for all genes and store as SingleCellExperiment
 

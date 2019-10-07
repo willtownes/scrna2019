@@ -9,12 +9,12 @@ ERCC spike ins
 
 ```{r}
 library(SingleCellExperiment)
+library(ggplot2); theme_set(theme_bw())
 library(cowplot)
-#library(ggplot2); theme_set(theme_bw())
 library(Matrix)
+library(glmpca)
 source("./util/functions.R")
 source("./algs/existing.R")
-source("./algs/glmpca.R")
 source("./util/clustering.R")
 fp<-file.path
 bp<-"./real/zheng_2017_ercc"

@@ -3,9 +3,9 @@
 # Assumes already ran 01_data_loading.Rmd
 # Uses the Zheng 2017 PBMC 68K dataset
 library(SingleCellExperiment)
+library(glmpca)
 source("./util/functions.R") #null_residuals function
 source("./algs/existing.R") #pca and zinbwave functions
-source("./algs/glmpca.R")
 fp<-file.path
 
 funcs<-list()

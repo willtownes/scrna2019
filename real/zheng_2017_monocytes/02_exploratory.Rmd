@@ -8,14 +8,14 @@ output: html_document
 Zheng 2017 Monocytes (10x)
 
 ```{r}
-library(SingleCellExperiment)
+suppressPackageStartupMessages(library(SingleCellExperiment))
+library(ggplot2); theme_set(theme_bw())
 library(cowplot)
-#library(ggplot2)
 library(Matrix)
+library(glmpca)
 source("./util/functions.R")
 source("./algs/existing.R")
 source("./util/clustering.R")
-source("./algs/glmpca.R")
 fp<-file.path
 bp<-"./real/zheng_2017_monocytes"
 pth<-fp(bp,"results/fig")
@@ -42,13 +42,13 @@ pz<-colMeans(Y==0)
 Ypr<-null_residuals(Y,type="pearson")
 Ydr<-null_residuals(Y,type="deviance")
 rc<-assay(sce,"read_counts")
-Yl2scran<-assay(sce,"logcounts")
+#Yl2scran<-assay(sce,"logcounts")
 
 set.seed(205) #reproducibility
 ss<-sample.int(nrow(Y),size=5000) #subset random 5000 genes
 ```
 
-plot histogram of a particular gene for reads and umis
+plot histogram of a highly expressed gene for reads and umis
 
 ```{r}
 rmx<-apply(Y,1,max)
@@ -67,6 +67,23 @@ plot_grid(plotlist=plts)
 ggs("reads_vs_umis_monocytes.pdf")
 ```
 
+plot histogram of a lowly expressed gene for reads and umis
+
+```{r}
+rmx<-apply(Y,1,max)
+g<-match(3,rmx)
+gn<-rownames(Y)[g]
+pd<-list(data.frame(prot="raw_umi_counts",expr=Y[g,]))
+pd[[2]]<-data.frame(prot="raw_read_counts",expr=rc[g,])
+pd<-do.call(rbind,pd)
+plts<-list()
+#ymax<-2540
+(plts[[1]]<-ggplot(subset(pd,prot=="raw_umi_counts"),aes(x=expr))+geom_bar()+theme_bw()+xlab(paste(gn,"UMI counts"))+ylab("number of droplets in bin")+scale_y_log10())
+ggs("monocytes_lo_umi_distr.pdf")
+(plts[[2]]<-ggplot(subset(pd,prot=="raw_read_counts"),aes(x=expr))+geom_histogram(bins=20)+theme_bw()+xlab(paste(gn,"read counts"))+ylab("number of droplets in bin")+scale_y_log10())#+ylab(NULL))
+ggs("monocytes_lo_read_distr.pdf")
+```
+
 Fraction of zeros in each droplet determined by total UMIs.
 
 ```{r}
@@ -76,10 +93,10 @@ pd<-data.frame(sz=sz,pz=pz)
 ggs("total_umi_vs_pzero_monocytes.pdf",plot=plt2)
 ```
 
-Log transformation distorts distribution
+Log transformation distorts distribution- highly expressed gene
 
 ```{r}
-#find gene where max count across all droplets was 5
+#find gene where max count across all droplets was 20
 rmx<-apply(Y,1,max)
 g<-match(20,rmx)
 gn<-rownames(Y)[g] #ENSG00000114391
@@ -92,17 +109,73 @@ ggs("monocytes_distr_b_cpm.pdf",w=3,h=2)
 ggs("monocytes_distr_c_log2cpm.pdf",w=3,h=2)
 (plts[["logcptt"]]<-ggplot(data.frame(x=log2(1+Ycpm[g,]/100)),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+CPTT)")+ylab(NULL))
 ggs("monocytes_distr_d_log2cptt.pdf",w=3,h=2)
-(plts[["logscran"]]<-ggplot(data.frame(x=Yl2scran[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+scran)")+ylab(NULL))
-ggs("monocytes_distr_e_log2scran.pdf",w=3,h=2)
+#(plts[["logscran"]]<-ggplot(data.frame(x=Yl2scran[g,]),aes(x=x))+geom_histogram(bins=100)+theme_bw()+xlab("log2(1+scran)")+ylab(NULL))
+#ggs("monocytes_distr_e_log2scran.pdf",w=3,h=2)
 
 plot_grid(plotlist=plts,nrow=2)
 ggs("counts_vs_log_cpm_histograms_monocytes.pdf",w=7.5,h=5)
+```
+
+Log transformation distorts distribution- lowly expressed gene
+
+```{r}
+#find gene where max count across all droplets was 3
+rmx<-apply(Y,1,max)
+g<-match(3,rmx)
+gn<-rownames(Y)[g] #ENSG00000188976
+plts<-list()
+(plts[["umi"]]<-ggplot(data.frame(x=Y[g,]),aes(x=x))+geom_bar()+theme_bw()+xlab("counts")+ylab(NULL)+scale_y_log10())
+ggs("monocytes_lo_distr_a_umi_counts.pdf",w=3,h=2)
+(plts[["cpm"]]<-ggplot(data.frame(x=Ycpm[g,]),aes(x=x))+geom_histogram(bins=20)+theme_bw()+xlab("CPM")+ylab(NULL)+scale_y_log10())
+ggs("monocytes_lo_distr_b_cpm.pdf",w=3,h=2)
+(plts[["logcpm"]]<-ggplot(data.frame(x=Yl2[g,]),aes(x=x))+geom_histogram(bins=20)+theme_bw()+xlab("log2(1+CPM)")+ylab(NULL)+scale_y_log10())
+ggs("monocytes_lo_distr_c_log2cpm.pdf",w=3,h=2)
+(plts[["logcptt"]]<-ggplot(data.frame(x=log2(1+Ycpm[g,]/100)),aes(x=x))+geom_histogram(bins=20)+theme_bw()+xlab("log2(1+CPTT)")+ylab(NULL)+scale_y_log10())
+ggs("monocytes_lo_distr_d_log2cptt.pdf",w=3,h=2)
+#(plts[["logscran"]]<-ggplot(data.frame(x=Yl2scran[g,]),aes(x=x))+geom_histogram(bins=20)+theme_bw()+xlab("log2(1+scran)")+ylab(NULL)+scale_y_log10())
+#ggs("monocytes_lo_distr_e_log2scran.pdf",w=3,h=2)
+
+#plot_grid(plotlist=plts,nrow=2)
+#ggs("counts_vs_log_cpm_histograms_monocytes.pdf",w=7.5,h=5)
+```
+
+Examine genes with strongest loading on PC1.
+
+```{r}
+Yl2_ss<-Yl2[ss,]
+pca_obj<-pca(Yl2_ss,2,ret_obj=TRUE)$obj
+#find genes with largest loadings
+gm<-data.frame(gene=rownames(Yl2_ss),loading1=pca_obj$rotation[,1])
+
+#convert ensembl to hugo
+mart<-biomaRt::useDataset("hsapiens_gene_ensembl",biomaRt::useMart("ensembl"))
+bml<-biomaRt::getBM(filters="ensembl_gene_id",attributes=c("ensembl_gene_id","hgnc_symbol"),values=gm$gene,mart=mart)
+gm<-merge(gm,bml,by.x="gene",by.y="ensembl_gene_id")
+o<-order(abs(gm$loading1),decreasing=TRUE)
+gm<-gm[o,c(1,3,2)]
+Ytop<-t(Y[gm$gene[1:5],])
+#colnames(Ytop)<-gm$hgnc_symbol[1:5]
+Ytop2<-cbind(pzero=pz,log10umi=z,Ytop)
+cor(Ytop2)
+head(gm,20)
+
+#download list of marker genes for monocytes
+mg<-data.table::fread("https://panglaodb.se/markers/PanglaoDB_markers_24_Sep_2019.tsv.gz")
+mg<-as.data.frame(mg)
+mg<-subset(mg,`cell type` == "Monocytes" & `canonical marker`==1)
+gm$marker<-gm$hgnc_symbol %in% mg$`official gene symbol`
+table(gm$marker) #26 genes are monocytes markers
+#monocytes marker genes from Zhang et al 2019
+#zh<-c("VIM","CD14","FCGR3A","CD33","ITGAX","ITGAM","CD4","PTPRC","LYZ")
+ggplot(gm,aes(x=marker,fill=marker,y=loading1))+geom_boxplot()+theme(legend.position = "none")+xlab("monocyte marker gene")+ylab("gene loading value on first PC")
+ggs("monocyte_marker_gene_loadings.pdf",w=6,h=4)
 ```
 
 Library Size/ Fraction of Zeros dominates first PC even after normalization/ log transform
 
 ```{r}
 factors<-pca(Ycpm[ss,],2)
+
 pd<-cbind(factors,zero_frac=pz,log_total_umi=z)
 round(cor(pd[,colnames(pd)!="cl"]),1)
 
@@ -114,7 +187,6 @@ ggplot(pd,aes(x=dim1,y=dim2,colour=zero_frac))+geom_point()+scale_color_continuo
 ggs("log_cpm_pca12_zerofrac_monocytes.pdf")
 ggplot(pd,aes(x=zero_frac,y=dim1,colour=log_total_umi))+geom_point()+scale_color_continuous(low="red",high="blue")+xlab("zero fraction")+ylab("dimension 1")
 ggs("log_cpm_pca1_zerofrac_total_umi_monocytes.pdf")
-
 
 #apply clustering to the result of PCA
 cl<-seurat_cluster(factors,res=0.5)
