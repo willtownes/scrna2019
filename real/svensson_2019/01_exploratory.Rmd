@@ -1,0 +1,86 @@
+---
+title: "Exploratory"
+author: "Will Townes"
+date: "11/27/2019"
+output: html_document
+---
+
+```{r}
+library(Seurat)
+library(tidyverse); theme_set(theme_bw())
+source("./util/functions.R")
+
+fp<-file.path
+bp<-"./real/svensson_2019"
+```
+
+This was inspired by a question from Ming Tang:
+
+https://divingintogeneticsandgenomics.rbind.io/post/modeling-single-cell-rnaseq-data-with-multinomial-distribution/
+
+### Data Loading
+
+Download Svensson chromium control dataset from:
+
+https://figshare.com/articles/svensson_chromium_control_h5ad/7860092
+
+save it in the "data" subfolder.
+
+```{r}
+#code from Ming Tang's blog post
+svensson_data<-ReadH5AD(fp(bp,"data/svensson_chromium_control.h5ad"))
+raw_counts<- svensson_data@assays$RNA@counts
+# I am going to use only the second dataset svensson et al 2
+raw_counts2<- raw_counts[, grepl(pattern = "20312_", x = colnames(raw_counts))]
+gg<-rowSums(raw_counts2)>0 #exclude genes that are zero across all cells
+Y<-raw_counts2[gg,]
+```
+
+### Graphs
+
+There is a lot of variation in total counts across droplets, and the total counts and zero fraction of a droplet are highly correlated
+
+```{r}
+total_counts<-colSums(Y)
+hist(total_counts,breaks=100)
+abline(v=2000,col="red")
+pzero<-1-colMeans(Y>0)
+plot(total_counts,pzero)
+```
+
+To make the droplets comparable, we will exclude droplets with total count below 2,000 and downsample all other droplets to have approximately the same total counts.
+
+```{r}
+Yss<-Y[,total_counts>2000]
+#downsample to normalize droplet size (total UMI)
+Yds<-Down_Sample_Matrix(Yss)
+```
+
+Show relationship between mean expression and probability of zero follows multinomial prediction.
+
+```{r}
+Yds<-Yds[rowSums(Yds)>0,]
+#variance=mean, suggests poisson
+m<-rowMeans(Yds); v<-apply(Yds,1,var)
+summary(v/m)
+plot(log(m),log(v),xlab="log(mean)",ylab="log(var)")
+abline(0,1,col="blue",lwd=2) #poi
+curve(x+log1p(exp(x)/100),from=-8,to=7,add=TRUE,lty=2,col="red",lwd=2) #nb
+
+N<-median(colSums(Yds))
+predict_zeros_binom<-function(x){(1-exp(x)/N)^N} #binomial
+predict_zeros_poi<-function(x){exp(-exp(x))}
+predict_zeros_nb<-function(x,phi=100){
+  exp(-phi*log1p(exp(x-log(phi))))
+}
+pd<-data.frame(log_mean=log(m),frac_zero=rowMeans(Yds==0))
+xlo<-min(pd$log_mean)
+xhi<-max(pd$log_mean)
+#xcv<-data.frame(x=c(xlo,xhi))
+
+with(pd,plot(log_mean,frac_zero,xlab="log of mean expression",ylab="fraction of zero droplets",cex=1.5,main="Svensson 2019 Chromium Negative Control"))
+curve(predict_zeros_binom,from=xlo,to=xhi,col="blue",lwd=4,add=TRUE)
+curve(predict_zeros_poi,from=xlo,to=xhi,col="green",lwd=3,lty=2,add=TRUE)
+curve(predict_zeros_nb(x,phi=10),from=xlo,to=xhi,col="red",lwd=3,lty=3,add=TRUE)
+legend("bottomleft",c("Multinomial","Poisson","Negative Binomial"),lty=c(1,2,3),lwd=c(4,3,3),col=c("blue","green","red"))
+```
