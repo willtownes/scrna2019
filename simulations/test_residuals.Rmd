@@ -1,0 +1,74 @@
+---
+title: "Assess the Accuracy of the Residuals Approximation to GLM-PCA"
+author: "Will Townes"
+output: html_document
+---
+
+```{r}
+library(ggplot2); theme_set(theme_bw())
+library(glmpca)
+source("./algs/existing.R")
+source("./util/functions.R")
+fp<-file.path
+bp<-"./simulations"
+```
+
+The idea for this simulation was originally proposed by Jake Yeung: https://github.com/willtownes/scrna2019/issues/2
+
+```{r}
+ngenes <- 5000 #must be divisible by 10
+ngenes_informative<-ngenes*.1
+ncells <- 50 #number of cells per cluster, must be divisible by 2
+nclust<- 3
+# simulate two batches with different depths
+batch<-rep(1:2, each = nclust*ncells/2)
+ncounts <- rpois(ncells*nclust, lambda = 1000*batch)
+# generate profiles for 3 clusters
+profiles_informative <- replicate(nclust, exp(rnorm(ngenes_informative)))
+profiles_const<-matrix(ncol=nclust,rep(exp(rnorm(ngenes-ngenes_informative)),nclust))
+profiles <- rbind(profiles_informative,profiles_const)
+# generate cluster labels
+clust <- sample(rep(1:3, each = ncells))
+# generate single-cell transcriptomes 
+counts <- sapply(seq_along(clust), function(i){
+	rmultinom(1, ncounts[i], prob = profiles[,clust[i]])
+})
+rownames(counts) <- paste("gene", seq(nrow(counts)), sep = "_")
+colnames(counts) <- paste("cell", seq(ncol(counts)), sep = "_")
+# clean up rows
+Y <- counts[rowSums(counts) > 0, ]
+sz<-colSums(Y)
+Ycpm<-1e6*t(t(Y)/sz)
+Yl2<-log2(1+Ycpm)
+z<-log10(sz)
+pz<-1-colMeans(Y>0)
+cm<-data.frame(total_counts=sz,zero_frac=pz,clust=factor(clust),batch=factor(batch))
+Ypr<-null_residuals(Y,type="pearson")
+Ydr<-null_residuals(Y,type="deviance")
+```
+
+```{r}
+dr_list<-c("glmpca","pca","pca_rp","pca_rd")
+drfunc<-function(mthd=dr_list,L=2,verbose=FALSE){
+  #global variables Y, Yl2, Ydr, Ypr, cm
+  mthd<-match.arg(mthd)
+  if(mthd=="glmpca"){
+    toc<-system.time(factors<-glmpca(Y,L)$factors)
+  } else if(mthd=="pca"){
+    toc<-system.time(factors<-pca(Yl2,L))
+  } else if(mthd=="pca_rp"){
+    toc<-system.time(factors<-pca(Ypr,L))
+  } else if(mthd=="pca_rd"){
+    toc<-system.time(factors<-pca(Ydr,L))
+  } else {
+    stop("invalid method")
+  }
+  toc<-signif(toc["elapsed"],3)
+  if(verbose){ message("method: ",mthd,", elapsed (s): ",toc) }
+  cbind(cm,method=mthd,factors)
+}
+pd<-do.call(rbind,lapply(dr_list,drfunc,verbose=TRUE))
+ggplot(pd,aes(x=dim1,y=dim2,colour=clust,shape=batch))+geom_point(size=2)+facet_wrap(~method,scales="free")
+ggsave(fp(bp,"test_residuals_scatter.pdf"),width=6,height=4)
+```
+
