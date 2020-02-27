@@ -6,6 +6,10 @@ This repository contains supporting code to facilitate reproducible analysis. Fo
 
 GLM-PCA (dimension reduction for generalized linear model likelihoods) is now available as a [standalone R package](https://github.com/willtownes/glmpca). This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
 
+The [scry R package](https://github.com/kstreet13/scry) contains functions for feature selection using deviance,
+computation of null residuals, and interfaces to apply these methods and GLM-PCA to Bioconductor objects 
+such as SingleCellExperiment and SummarizedExperiment.
+
 ### Authors
 
 Will Townes, Stephanie Hicks, Martin Aryee, and Rafa Irizarry
@@ -30,7 +34,7 @@ Systematic assessment of clustering performance of a variety of normalization, f
 
 ### util
 
-Utility functions. 
+Utility functions. Please consider using the updated versions of these functions via the [scry R package](https://github.com/kstreet13/scry).
 
 * *clustering.R* - wrappers for seurat clustering, model based clustering, and k-means
 * *functions.R* - Poisson and Binomial deviance and residuals functions, a function for loading 10x read counts from molecule information files.
