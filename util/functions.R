@@ -81,10 +81,10 @@ Down_Sample_Matrix<-function(expr_mat,min_lib_size=NULL){
 
 ##### Deviance functions #####
 
-poisson_deviance<-function(x,mu,sz){
+poisson_deviance<-function(x,lambda,sz){
   #assumes log link and size factor sz on the same scale as x (not logged)
   #stopifnot(all(x>=0 & sz>0))
-  2*sum(x*log(x/(sz*mu)),na.rm=TRUE)-2*sum(x-sz*mu)
+  2*sum(x*log(x/(sz*lambda)),na.rm=TRUE)-2*sum(x-sz*lambda)
 }
 
 multinomial_deviance<-function(x,p){
