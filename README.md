@@ -2,11 +2,13 @@
 
 [![DOI](https://zenodo.org/badge/174751869.svg)](https://zenodo.org/badge/latestdoi/174751869)
 
-This repository contains supporting code to facilitate reproducible analysis. For details see the [biorxiv preprint](https://www.biorxiv.org/content/10.1101/574574v1). If you find bugs please create a github issue. 
+This repository contains supporting code to facilitate reproducible analysis. For details see the [Genome Biology publication](https://doi.org/10.1186/s13059-019-1861-6). If you find bugs please create a github issue. 
 
-GLM-PCA (dimension reduction for generalized linear model likelihoods) is now available as a [standalone R package](https://github.com/willtownes/glmpca). This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
+**Please do not use this code for your own analyses! It is not updated. Better implementations are available in the following two R packages.**
 
-The [scry R package](https://github.com/kstreet13/scry) contains functions for feature selection using deviance,
+GLM-PCA (dimension reduction for generalized linear model likelihoods) is now available as a [standalone R package](https://cran.r-project.org/package=glmpca). This method is highlighted in the paper as being suitable for single cell RNA-Seq data.
+
+The [scry R package](https://bioconductor.org/packages/release/bioc/html/scry.html) contains functions for feature selection using deviance,
 computation of null residuals, and interfaces to apply these methods and GLM-PCA to Bioconductor objects 
 such as SingleCellExperiment and SummarizedExperiment.
 
